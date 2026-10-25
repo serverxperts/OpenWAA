@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/logo/openwa_logo.webp" alt="OpenWA Logo" width="200"/>
+  <img src="docs/logo/openwa_logo.webp" alt="WhatsMsg Logo" width="200"/>
 </p>
 
-<h1 align="center">OpenWA</h1>
+<h1 align="center">WhatsMsg</h1>
 <p align="center">
   <strong>Open Source WhatsApp API Gateway</strong>
 </p>
@@ -16,23 +16,21 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/rmyndharis/OpenWA/actions/workflows/ci.yml"><img src="https://github.com/rmyndharis/OpenWA/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"/></a>
-  <img src="https://img.shields.io/github/package-json/v/rmyndharis/OpenWA?label=version&color=blue" alt="Version"/>
+  <img src="https://img.shields.io/badge/version-v0.25.0-blue.svg" alt="Version"/>
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"/>
   <img src="https://img.shields.io/badge/node-22_LTS-brightgreen.svg" alt="Node"/>
-  <img src="https://img.shields.io/github/package-json/dependency-version/rmyndharis/OpenWA/@nestjs/core?label=NestJS&color=red" alt="NestJS"/>
+  <img src="https://img.shields.io/badge/NestJS-^11.2.7-red.svg" alt="NestJS"/>
   <img src="https://img.shields.io/badge/docker-ready-blue.svg" alt="Docker"/>
-  <img src="https://img.shields.io/github/package-json/dependency-version/rmyndharis/OpenWA/dev/typescript?label=TypeScript&color=3178C6" alt="TypeScript"/>
-  <a href="https://buymeacoffee.com/rmyndharis"><img src="https://img.shields.io/badge/Buy_Me_a_Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black" alt="Buy Me a Coffee"/></a>
+  <img src="https://img.shields.io/badge/TypeScript-~6.0.3-3178C6.svg" alt="TypeScript"/>
 </p>
 
 ---
 
-## ✨ Why OpenWA?
+## ✨ Why WhatsMsg?
 
-**OpenWA** is a free, open-source WhatsApp API Gateway designed for developers who need full control over their messaging infrastructure—without vendor lock-in or hidden paywalls.
+**WhatsMsg** is a free, open-source WhatsApp API Gateway designed for developers who need full control over their messaging infrastructure—without vendor lock-in or hidden paywalls.
 
-Built on a **pluggable architecture**, OpenWA lets you select database engines (SQLite/PostgreSQL), media storage backends (Local/S3), and cache layers (disabled/Redis) through configuration rather than application-code changes. The storage backend is the live store for status media and, when chat-media archiving is enabled, archived chat media; other message media is returned inline to API and webhook consumers. Of the media, `scripts/backup.sh` archives only the local media directory, so an S3 bucket needs a backup of its own.
+Built on a **pluggable architecture**, WhatsMsg lets you select database engines (SQLite/PostgreSQL), media storage backends (Local/S3), and cache layers (disabled/Redis) through configuration rather than application-code changes. The storage backend is the live store for status media and, when chat-media archiving is enabled, archived chat media; other message media is returned inline to API and webhook consumers. Of the media, `scripts/backup.sh` archives only the local media directory, so an S3 bucket needs a backup of its own.
 
 |                               |                                                                                                                                          |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
