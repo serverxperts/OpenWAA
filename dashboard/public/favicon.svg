@@ -1,26 +1,68 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
-    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#4ade80"/>
-      <stop offset="100%" stop-color="#22c55e"/>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b1219"/>
+      <stop offset="100%" stop-color="#05080d"/>
     </linearGradient>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="4" stdDeviation="12" flood-color="#22c55e" flood-opacity="0.5"/>
+
+    <!-- Neon Cyan & Mint Green Gradient -->
+    <linearGradient id="neonGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00f2fe"/>
+      <stop offset="35%" stop-color="#00e5a3"/>
+      <stop offset="70%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+
+    <!-- Subtle Border Glow -->
+    <linearGradient id="borderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00f2fe" stop-opacity="0.9"/>
+      <stop offset="50%" stop-color="#10b981" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#00f2fe" stop-opacity="0.6"/>
+    </linearGradient>
+
+    <!-- Glow Filter -->
+    <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
     </filter>
   </defs>
-  <rect width="512" height="512" rx="128" fill="#0b1120"/>
-  <path d="M256 96 C167.6 96 96 167.6 96 256 C96 288.6 105.8 318.9 122.6 344.4 L102.4 416 L176.8 396.4 C200.7 409.2 227.6 416 256 416 C344.4 416 416 344.4 416 256 C416 167.6 344.4 96 256 96 Z" 
-        fill="none" 
-        stroke="url(#glow)" 
-        stroke-width="28" 
-        stroke-linejoin="round"
-        stroke-linecap="round"
-        filter="url(#shadow)"/>
-  <path d="M192 212 L222 300 L256 236 L290 300 L320 212" 
-        fill="none" 
-        stroke="url(#glow)" 
-        stroke-width="26" 
-        stroke-linecap="round" 
-        stroke-linejoin="round"
-        filter="url(#shadow)"/>
+
+  <!-- Background Squircle Container -->
+  <rect x="20" y="20" width="472" height="472" rx="124" fill="url(#bgGrad)" stroke="url(#borderGrad)" stroke-width="7"/>
+
+  <!-- Logo Graphics with Glow -->
+  <g filter="url(#softGlow)">
+    <!-- Elegant Chat Bubble Contour -->
+    <path d="M 256 94 
+             C 162 94, 88 165, 88 252 
+             C 88 285, 99 316, 119 342 
+             L 96 418 
+             L 177 395 
+             C 201 405, 228 410, 256 410 
+             C 350 410, 424 339, 424 252 
+             C 424 165, 350 94, 256 94 Z" 
+          fill="none" 
+          stroke="url(#neonGrad)" 
+          stroke-width="26" 
+          stroke-linecap="round" 
+          stroke-linejoin="round"/>
+
+    <!-- Fluid Modern W Emblem -->
+    <path d="M 172 216 
+             C 180 252, 196 304, 208 330 
+             C 214 342, 225 342, 231 330 
+             C 240 312, 250 270, 256 250 
+             C 262 270, 272 312, 281 330 
+             C 287 342, 298 342, 304 330 
+             C 316 304, 332 252, 340 216" 
+          fill="none" 
+          stroke="url(#neonGrad)" 
+          stroke-width="28" 
+          stroke-linecap="round" 
+          stroke-linejoin="round"/>
+  </g>
 </svg>
