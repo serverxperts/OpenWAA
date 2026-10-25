@@ -201,15 +201,16 @@ export function createSwaggerConfig(): Omit<OpenAPIObject, 'paths'> {
   // Source the API version from package.json so it tracks releases automatically — no manual bump, no drift.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { version } = require('../../package.json') as { version: string };
+  const appName = process.env.APP_NAME || 'WhatsMsg';
   return (
     new DocumentBuilder()
-      .setTitle('OpenWA API')
+      .setTitle(`${appName} API`)
       // Three refusals are issued by middleware BEFORE routing, so they apply to every operation
       // below and cannot be expressed as a per-operation @ApiResponse without repeating them 187
       // times. Documenting them here keeps the contract honest for clients that would otherwise
       // meet an undocumented status.
       .setDescription(
-        'Open Source WhatsApp API Gateway - Free, Self-Hosted HTTP API\n\n' +
+        `${appName} - Open Source WhatsApp API Gateway - Free, Self-Hosted HTTP API\n\n` +
           '**Gateway-wide responses.** Three statuses are returned by middleware before routing, ' +
           'so any operation can emit them:\n\n' +
           '- `415 Unsupported Media Type` — the request body carries a `Content-Encoding` other ' +
@@ -245,7 +246,7 @@ export function createSwaggerConfig(): Omit<OpenAPIObject, 'paths'> {
       // Apply the scheme globally so Swagger UI sends the key with every request
       // (mirrors the global ApiKeyGuard). Without this, "Authorize" is cosmetic.
       .addSecurityRequirements(API_KEY_SECURITY_SCHEME)
-      .setContact('OpenWA', 'https://github.com/rmyndharis/OpenWA', 'yudhi@rmyndharis.com')
+      .setContact(appName, process.env.APP_URL || 'https://whatsmsg.in', process.env.APP_EMAIL || 'support@whatsmsg.in')
       .addTag('sessions', 'WhatsApp session management')
       .addTag('messages', 'Send and manage messages')
       .addTag('webhooks', 'Webhook configuration')

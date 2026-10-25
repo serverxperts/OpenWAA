@@ -6,7 +6,7 @@
     }
   },
   "common": {
-    "appName": "OpenWA",
+    "appName": "WhatsMsg",
     "updateAvailable": "v{{version}} tersedia",
     "loading": "Memuat...",
     "cancel": "Batal",
@@ -346,7 +346,7 @@
     "connectionError": "Tidak dapat terhubung ke server. Silakan coba lagi.",
     "help": "Butuh bantuan?",
     "viewDocs": "Lihat Dokumentasi",
-    "footer": "Dibuat dengan ❤️ oleh Yudhi Armyndharis dan Komunitas OpenWA",
+    "footer": "Dibuat dengan ❤️ oleh Yudhi Armyndharis dan Komunitas WhatsMsg",
     "version": "v{{version}} · {{date}}"
   },
   "dashboard": {
@@ -999,7 +999,7 @@
     "zeroMessages": "Nol Pesan Terkirim",
     "noSession": {
       "title": "Tidak ada sesi WhatsApp aktif yang terhubung.",
-      "desc": "Untuk memeriksa nomor telepon, OpenWA memerlukan setidaknya satu sesi yang sudah terautentikasi.",
+      "desc": "Untuk memeriksa nomor telepon, WhatsMsg memerlukan setidaknya satu sesi yang sudah terautentikasi.",
       "goToSessions": "Buka Sesi"
     },
     "tabs": {
@@ -1119,7 +1119,7 @@
       "postgres": "PostgreSQL",
       "postgresDesc": "Database siap produksi",
       "useBuiltIn": "Gunakan Container PostgreSQL Bawaan",
-      "builtInDesc": "OpenWA akan mengelola container PostgreSQL untuk Anda",
+      "builtInDesc": "WhatsMsg akan mengelola container PostgreSQL untuk Anda",
       "dbName": "Nama Database",
       "schema": "Skema",
       "schemaDesc": "Skema PostgreSQL (diabaikan untuk SQLite). Default 'public'. Skema harus sudah ada.",
@@ -1154,7 +1154,7 @@
       "enable": "Aktifkan Redis",
       "enableDesc": "Digunakan untuk caching, antrian BullMQ, penghitung rate limit, dan distribusi WebSocket multi-node",
       "useBuiltIn": "Gunakan Container Redis Bawaan",
-      "builtInDesc": "OpenWA akan mengelola container Redis untuk Anda",
+      "builtInDesc": "WhatsMsg akan mengelola container Redis untuk Anda",
       "queueTitle": "Aktifkan Sistem Antrian BullMQ",
       "queueDesc": "Gunakan antrian pesan untuk pengiriman pesan dan webhook yang andal",
       "statsTitle": "Statistik Antrian",
@@ -1177,7 +1177,7 @@
       "s3": "Amazon S3",
       "s3Desc": "Penyimpanan cloud (kompatibel S3)",
       "useBuiltIn": "Gunakan Container MinIO Bawaan",
-      "builtInDesc": "OpenWA akan mengelola container MinIO (kompatibel S3) untuk Anda",
+      "builtInDesc": "WhatsMsg akan mengelola container MinIO (kompatibel S3) untuk Anda",
       "storagePath": "Path Penyimpanan",
       "bucket": "Nama Bucket",
       "region": "Region",
@@ -1208,7 +1208,7 @@
       "importFailed": "Gagal mengimpor data",
       "importOk": "Data diimpor",
       "importConfirm": "Mengimpor akan MENGGANTI semua data saat ini dengan cadangan ({{rows}} baris). Ini tidak dapat dibatalkan. Lanjutkan?",
-      "invalidFile": "Berkas tersebut bukan cadangan data OpenWA yang valid.",
+      "invalidFile": "Berkas tersebut bukan cadangan data WhatsMsg yang valid.",
       "importTooLarge": "Cadangan terlalu besar untuk batas permintaan. Tingkatkan BODY_SIZE_LIMIT di server dan coba lagi."
     },
     "restart": {
@@ -1262,7 +1262,7 @@
     "uninstallConfirm": "Copot \"{{name}}\"? Ini akan menghapus berkasnya.",
     "empty": {
       "title": "Tidak ada plugin terpasang",
-      "description": "Instal plugin untuk memperluas kemampuan OpenWA."
+      "description": "Instal plugin untuk memperluas kemampuan WhatsMsg."
     },
     "config": {
       "title": "Konfigurasi {{name}}",
@@ -1285,7 +1285,7 @@
       "trustWarning": "Plugin berjalan dengan hak penuh proses gateway — sandbox menampung crash, bukan kode berbahaya. Instal hanya plugin yang Anda percayai.",
       "choose": "Pilih berkas .zip…",
       "tooLarge": "Berkas melebihi batas 5 MB.",
-      "catalogHint": "Instal langsung dari katalog plugin OpenWA. Berkas .zip diambil sisi server melalui pengaman SSRF, lalu divalidasi dan di-sandbox.",
+      "catalogHint": "Instal langsung dari katalog plugin WhatsMsg. Berkas .zip diambil sisi server melalui pengaman SSRF, lalu divalidasi dan di-sandbox.",
       "catalogTeaser": "Mencari plugin?",
       "catalogTeaserSuffix": "menjelajahi marketplace resmi.",
       "tabCatalog": "Katalog",

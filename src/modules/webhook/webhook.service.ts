@@ -334,7 +334,7 @@ export class WebhookService implements OnModuleInit, OnModuleDestroy {
       idempotencyKey: `test_${deliveryId}_${webhook.id}`,
       deliveryId,
       data: {
-        message: 'This is a test webhook from OpenWA',
+        message: 'This is a test webhook from WhatsMsg',
         webhookId: webhook.id,
         url: webhook.url,
       },

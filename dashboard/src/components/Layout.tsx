@@ -74,6 +74,11 @@ export function Layout({ onLogout, userRole }: LayoutProps) {
   // Show the build-time version immediately, then replace it with the live running version from the
   // backend so a stale-built bundle can't display the wrong number. Falls back silently on error.
   const [version, setVersion] = useState(__APP_VERSION__);
+  const appName =
+    localStorage.getItem('custom_app_name') ||
+    (typeof __APP_NAME__ !== 'undefined' && __APP_NAME__) ||
+    t('common.appName') ||
+    'WhatsMsg';
   // A newer published release, shown to admins as a link to its notes. The route is ADMIN-only, refuses a
   // session-scoped key, and answers quietly when GitHub is unreachable or the check is turned off.
   const [update, setUpdate] = useState<{ latest: string; url: string } | null>(null);
@@ -173,8 +178,8 @@ export function Layout({ onLogout, userRole }: LayoutProps) {
             {isMobileOpen ? <X size={24} /> : <Menu size={24} />}
           </button>
           <div className="mobile-brand">
-            <img src="/openwa_logo.webp" alt="OpenWA" className="sidebar-logo" />
-            <span className="brand-name">{t('common.appName')}</span>
+            <img src="/openwa_logo.webp" alt={appName} className="sidebar-logo" />
+            <span className="brand-name">{appName}</span>
           </div>
           <div style={{ width: 40 }} />
         </header>
@@ -186,10 +191,10 @@ export function Layout({ onLogout, userRole }: LayoutProps) {
         className={`sidebar ${isCollapsed ? 'collapsed' : ''} ${isMobile ? 'mobile' : ''} ${isMobileOpen ? 'open' : ''}`}
       >
         <div className="sidebar-header">
-          <img src="/openwa_logo.webp" alt="OpenWA" className="sidebar-logo" />
+          <img src="/openwa_logo.webp" alt={appName} className="sidebar-logo" />
           {!isCollapsed && (
             <div className="sidebar-brand">
-              <span className="brand-name">{t('common.appName')}</span>
+              <span className="brand-name">{appName}</span>
               <span className="brand-version">v{version}</span>
               {update && (
                 <a className="brand-update" href={update.url} target="_blank" rel="noopener noreferrer">
