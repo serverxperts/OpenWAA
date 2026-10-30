@@ -47,6 +47,7 @@ export function loadEnvironment(): void {
       const localDataDir = path.resolve(process.cwd(), 'data');
       if (!fs.existsSync(localDataDir)) {
         fs.symlinkSync(persistentDir, localDataDir, process.platform === 'win32' ? 'junction' : 'dir');
+        logger.log(`[Storage] Linked persistent storage: ${localDataDir} -> ${persistentDir}`);
       } else {
         const stat = fs.lstatSync(localDataDir);
         if (!stat.isSymbolicLink()) {
@@ -60,9 +61,13 @@ export function loadEnvironment(): void {
           }
           fs.rmSync(localDataDir, { recursive: true, force: true });
           fs.symlinkSync(persistentDir, localDataDir, process.platform === 'win32' ? 'junction' : 'dir');
+          logger.log(`[Storage] Migrated and linked persistent storage: ${localDataDir} -> ${persistentDir}`);
+        } else {
+          logger.log(`[Storage] Persistent storage verified: ${localDataDir} -> ${persistentDir}`);
         }
       }
-    } catch {
+    } catch (err) {
+      logger.warn(`[Storage] Persistent storage note: ${(err as Error)?.message || 'fallback to local data dir'}`);
       /* best-effort fallback to standard local directory */
     }
   }
