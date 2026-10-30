@@ -104,6 +104,15 @@ export function loadEnvironment(): void {
     process.env.DATABASE_SYNCHRONIZE = 'false';
   }
 
+  // Cloud Postgres (Supabase, Neon, RDS) uses self-signed / intermediate CA chains. Default rejectUnauthorized to false unless explicitly set.
+  if (
+    process.env.DATABASE_TYPE === 'postgres' &&
+    process.env.DATABASE_SSL === 'true' &&
+    !process.env.DATABASE_SSL_REJECT_UNAUTHORIZED
+  ) {
+    process.env.DATABASE_SSL_REJECT_UNAUTHORIZED = 'false';
+  }
+
   // Snapshot what the HOST supplied, before the two file layers below are merged in. Afterwards a
   // file value is indistinguishable from an orchestrator override — both just sit in process.env —
   // so anything asking "is this key overridden?" (the save-config boot guard) needs this record.
@@ -115,6 +124,13 @@ export function loadEnvironment(): void {
     dotenv.config({ path: userEnvPath, override: false, quiet: true });
     if (process.env.DATABASE_TYPE === 'postgres' && process.env.DATABASE_SYNCHRONIZE === 'true') {
       process.env.DATABASE_SYNCHRONIZE = 'false';
+    }
+    if (
+      process.env.DATABASE_TYPE === 'postgres' &&
+      process.env.DATABASE_SSL === 'true' &&
+      !process.env.DATABASE_SSL_REJECT_UNAUTHORIZED
+    ) {
+      process.env.DATABASE_SSL_REJECT_UNAUTHORIZED = 'false';
     }
   }
 
