@@ -97,6 +97,13 @@ export function loadEnvironment(): void {
   // selection and the external-Postgres password).
   clearBlankEnv(process.env, BLANK_SHADOWED_ENV_KEYS);
 
+  // Postgres safety: DATABASE_SYNCHRONIZE=true is forbidden with DATABASE_TYPE=postgres because
+  // TypeORM synchronize would drop migration-created full-text search indexes/columns (body_ts).
+  if (process.env.DATABASE_TYPE === 'postgres' && process.env.DATABASE_SYNCHRONIZE === 'true') {
+    logger.warn('DATABASE_SYNCHRONIZE=true is not allowed with Postgres; auto-resetting to false for migration safety.');
+    process.env.DATABASE_SYNCHRONIZE = 'false';
+  }
+
   // Snapshot what the HOST supplied, before the two file layers below are merged in. Afterwards a
   // file value is indistinguishable from an orchestrator override — both just sit in process.env —
   // so anything asking "is this key overridden?" (the save-config boot guard) needs this record.
@@ -106,6 +113,9 @@ export function loadEnvironment(): void {
   if (fs.existsSync(userEnvPath)) {
     logger.log(`Loading .env from: ${userEnvPath}`);
     dotenv.config({ path: userEnvPath, override: false, quiet: true });
+    if (process.env.DATABASE_TYPE === 'postgres' && process.env.DATABASE_SYNCHRONIZE === 'true') {
+      process.env.DATABASE_SYNCHRONIZE = 'false';
+    }
   }
 
   // Snapshot the layers that will SHADOW the dashboard-saved file — process env plus the .env just
