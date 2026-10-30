@@ -85,6 +85,7 @@
     "@nestjs/typeorm": "^11.0.3",
     "@nestjs/websockets": "^11.2.8",
     "@socket.io/redis-adapter": "^8.3.0",
+    "@supabase/supabase-js": "^2.0.0",
     "@whiskeysockets/baileys": "7.0.0-rc14",
     "adm-zip": "^0.6.1",
     "audio-decode": "^2.2.3",

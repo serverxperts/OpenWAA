@@ -29,6 +29,44 @@ export function loadEnvironment(): void {
   const generatedEnvPath = path.resolve(process.cwd(), 'data', '.env.generated');
   const userEnvPath = path.resolve(process.cwd(), '.env');
 
+  // Support persistent storage on Cloud platforms (Hostinger hbuilds, Render, Railway, etc.)
+  let persistentDir = process.env.PERSISTENT_DATA_DIR;
+  if (!persistentDir && process.cwd().includes('hbuilds')) {
+    const normalized = process.cwd().replace(/\\/g, '/');
+    const hbuildsIdx = normalized.indexOf('/hbuilds');
+    if (hbuildsIdx > 0) {
+      persistentDir = path.join(normalized.substring(0, hbuildsIdx), 'whatsmsg_storage');
+    }
+  }
+
+  if (persistentDir) {
+    try {
+      if (!fs.existsSync(persistentDir)) {
+        fs.mkdirSync(persistentDir, { recursive: true });
+      }
+      const localDataDir = path.resolve(process.cwd(), 'data');
+      if (!fs.existsSync(localDataDir)) {
+        fs.symlinkSync(persistentDir, localDataDir, process.platform === 'win32' ? 'junction' : 'dir');
+      } else {
+        const stat = fs.lstatSync(localDataDir);
+        if (!stat.isSymbolicLink()) {
+          const files = fs.readdirSync(localDataDir);
+          for (const file of files) {
+            const src = path.join(localDataDir, file);
+            const dest = path.join(persistentDir, file);
+            if (!fs.existsSync(dest)) {
+              fs.cpSync(src, dest, { recursive: true });
+            }
+          }
+          fs.rmSync(localDataDir, { recursive: true, force: true });
+          fs.symlinkSync(persistentDir, localDataDir, process.platform === 'win32' ? 'junction' : 'dir');
+        }
+      }
+    } catch {
+      /* best-effort fallback to standard local directory */
+    }
+  }
+
   // Ensure data directory exists
   const dataDir = path.dirname(generatedEnvPath);
   if (!fs.existsSync(dataDir)) {
