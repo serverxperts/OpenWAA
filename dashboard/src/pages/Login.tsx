@@ -102,6 +102,8 @@ export function Login({ onLogin }: LoginProps) {
                 onChange={e => setApiKey(e.target.value)}
                 placeholder={t('login.apiKeyPlaceholder')}
                 className={error ? 'error' : ''}
+                aria-invalid={error ? true : undefined}
+                aria-describedby={error ? 'apiKey-error' : undefined}
               />
               <button
                 type="button"
@@ -112,7 +114,11 @@ export function Login({ onLogin }: LoginProps) {
                 {showKey ? <EyeOff size={20} /> : <Eye size={20} />}
               </button>
             </div>
-            {error && <span className="error-message">{error}</span>}
+            {error && (
+              <span id="apiKey-error" className="error-message" role="alert">
+                {error}
+              </span>
+            )}
           </div>
 
           <button type="submit" className="connect-btn" disabled={isLoading}>
