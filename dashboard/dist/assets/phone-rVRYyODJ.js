@@ -1,0 +1,1 @@
+function e(e){let t=e.codePointAt(0),n=t;for(;/\p{Nd}/u.test(String.fromCodePoint(n-1));)n--;return String((t-n)%10)}function t(t){return t.replace(/[\uFF01-\uFF5E]/g,e=>String.fromCharCode(e.charCodeAt(0)-65248)).replace(/\p{Cf}/gu,``).replace(/(?![0-9])\p{Nd}/gu,e)}function n(e){let n=t(e).trim();return/^[\d\s+().-]+$/.test(n)?n.replace(/\D/g,``):``}export{n,t};
