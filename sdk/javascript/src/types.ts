@@ -261,11 +261,19 @@ export interface SendTextRequest {
    */
   linkPreview?: boolean;
   /**
-   * Attach a preview you supply yourself instead of one fetched from the URL. Nothing is fetched, so
-   * this works even for a URL the gateway cannot reach. **Baileys only** — whatsapp-web.js takes a
-   * boolean and answers 501. Cannot be combined with `linkPreview: false`.
+   * Attach a preview you supply yourself instead of one fetched from the URL. The page is not
+   * fetched, so this works even for a URL the gateway cannot reach. `thumbnailUrl` (fetched under the
+   * media SSRF rules) or `thumbnailBase64` (wins when both are set) adds an image, at most 5 MiB,
+   * rendered as the large card. **Baileys only** — whatsapp-web.js takes a boolean and answers 501.
+   * Cannot be combined with `linkPreview: false`.
    */
-  customLinkPreview?: { url: string; title: string; description?: string };
+  customLinkPreview?: {
+    url: string;
+    title: string;
+    description?: string;
+    thumbnailUrl?: string;
+    thumbnailBase64?: string;
+  };
   /**
    * Quote an earlier message, turning this send into a reply. Engine-specific: whatsapp-web.js
    * matches the serialized message id, Baileys the raw message key id of a message it has already
@@ -759,7 +767,11 @@ export interface ContactRecord {
   id: Jid;
   /** The name from the account's own addressbook. Absent for a contact that was never saved. */
   name?: string;
-  /** MSISDN digits, without a leading + or any separators. */
+  /**
+   * MSISDN digits, without a leading + or any separators, for a `<phone>@c.us` contact. For a `<lid>@lid`
+   * contact it depends on the engine: Baileys carries the phone's digits when the phone is known and an empty
+   * string when it is not; whatsapp-web.js carries the lid's digits, which are not a phone number.
+   */
   number: string;
   /** The name the contact set on their own account. Both engines emit this as `pushName`. */
   pushName?: string;
@@ -877,6 +889,11 @@ export interface GroupSubjectRequest {
 export interface GroupDescriptionRequest {
   /** May be empty to clear. */
   description: string;
+}
+
+export interface GroupMemberLabelRequest {
+  /** At most 30 UTF-16 code units (an astral emoji counts as two). May be empty to clear. */
+  label: string;
 }
 
 export interface InviteCodeResponse {
@@ -1062,9 +1079,10 @@ export interface WebhookDeliveryFailure {
   /** ISO timestamp of when the row was recorded. */
   createdAt: string;
   /**
-   * True when the row still holds the event data and can be replayed with
-   * {@link WebhooksResource.redriveDeliveryFailures}: a terminal row (`attempts > 0`) recorded while the
-   * gateway's `WEBHOOK_FAILURE_PAYLOAD_RETENTION_HOURS` is above 0, until that window passes.
+   * True when the row still holds the event data and its webhook still exists in the same session: a terminal
+   * row (`attempts > 0`) recorded while the gateway's `WEBHOOK_FAILURE_PAYLOAD_RETENTION_HOURS` is above 0, until
+   * that window passes. {@link WebhooksResource.redriveDeliveryFailures} replays it while that webhook is active
+   * and subscribed to the event.
    */
   replayable: boolean;
 }
@@ -1091,9 +1109,12 @@ export interface WebhookRedriveResult {
   enqueued: number;
   /** Replays that failed again; their rows stay, with attempts raised by one. */
   failed: number;
-  /** Rows not replayed: the webhook was removed, disabled or unsubscribed, or a plugin cancelled it. */
+  /**
+   * Selected rows not replayed: a hook cancelled the replay, or the row or its webhook changed during the call.
+   * Rows of a removed, disabled or unsubscribed webhook are left out before the batch and not counted.
+   */
   skipped: number;
-  /** Replayable rows still in scope after this call. */
+  /** Rows the redrive would still take after this call: replayable, in scope, with an active subscribed webhook. */
   remaining: number;
 }
 
@@ -1168,9 +1189,8 @@ export interface SubscribePresenceRequest {
 export interface MarkChatReadRequest extends MarkChatRequest {
   /**
    * Specific message IDs to acknowledge. Baileys acknowledges individual messages, so without this
-   * only the newest received message the engine still holds in memory gets a receipt: a burst
-   * leaves its earlier messages unread forever, and a restarted session has no message to
-   * acknowledge at all.
+   * only the newest received message gets a receipt (the one the engine holds in memory, else the
+   * newest received one the gateway stored): a burst leaves its earlier messages unread forever.
    * Callers that persist inbound message IDs should send them here. Ignored by whatsapp-web.js,
    * whose own sendSeen is chat-level. At most 100 per request; an empty array is rejected.
    */
@@ -1451,6 +1471,13 @@ export interface SendProductRequest {
 
 // ── Search ────────────────────────────────────────────────────────
 
+/**
+ * How `q` matches: `word` (the server default) matches whole words; `contains` matches any part of a
+ * word, ignoring case and accents, and needs at least one term of 3+ characters and a server with
+ * `SEARCH_CONTAINS_ENABLED=true` (501 otherwise).
+ */
+export type SearchMatch = 'word' | 'contains';
+
 /** Query parameters for `GET /search`. Only `q` is required; all filters are optional. */
 export interface SearchParams {
   /**
@@ -1458,6 +1485,8 @@ export interface SearchParams {
    * characters and 32 words, punctuation included; the server answers 400 above either.
    */
   q: string;
+  /** Match mode; the server defaults to `word`. */
+  match?: SearchMatch;
   /** Restrict to a single session. */
   sessionId?: string;
   /** Restrict to a single chat id. */

@@ -348,7 +348,7 @@ test('a severity filter that matches nothing says no logs exist, not that this p
   const { screen, fireEvent } = rtl;
   renderLogs();
   await screen.findByText('infra.restart');
-  fireEvent.click(screen.getByRole('button', { name: 'All Severities' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Severity, All Severities' }));
   fireEvent.click(screen.getByRole('option', { name: 'Error' }));
   await screen.findByText('No logs match these filters. Adjust the severity filter to widen the search.');
   assert.ok(screen.getByRole('heading', { name: 'No logs found' }));
@@ -359,6 +359,18 @@ test('the severity badge shows the translated severity', async () => {
   await rtl.screen.findByText('infra.restart');
   const badges = [...container.querySelectorAll('.severity-badge')].map(badge => badge.textContent);
   assert.deepEqual(badges, ['Info', 'Error']);
+});
+
+// A row's message is the only place some actions name what happened, such as the number and ids of a
+// phone_second_lid_reported row, so it is shown with the action rather than only searched and exported.
+test('a row shows its message under its action, and a row without one shows none', async () => {
+  const container = renderLogs();
+  const message = await rtl.screen.findByText('SESSION_STOP_INCOMPLETE');
+  assert.equal(message.closest('.action')?.firstChild?.textContent, 'session.stop');
+  const nullRow = [...container.querySelectorAll('.logs-table .action')].find(cell =>
+    cell.textContent?.startsWith('infra.restart'),
+  );
+  assert.equal(nullRow?.textContent, 'infra.restart');
 });
 
 test('the search matches errorMessage as well as action, whatever the case', async () => {

@@ -3,6 +3,7 @@ import * as wwebjs from 'whatsapp-web.js';
 import { MessageTypes, type Chat, type Client } from 'whatsapp-web.js';
 import { ChatSummary, ChatState } from '../interfaces/whatsapp-engine.interface';
 import { EngineTransportError } from '../../common/errors/engine-transport.error';
+import { EngineNotReadyError } from '../../common/errors/engine-not-ready.error';
 import { chatKind, isChannelJid } from '../identity/wa-id';
 import { WwebjsMessaging } from './wwebjs-messaging';
 import { type WwebjsEngineHost, rethrowIfNavigation } from './wwebjs-host';
@@ -17,13 +18,56 @@ import { mapWwebjsMessageType } from './message-mapper';
  * list that map is one uninterrupted synchronous stretch that starves the probe and lets the watchdog
  * tear a healthy session down mid-read: the #1501 shape readLeanContacts fixed for contacts.
  *
- * The models and their order are unchanged, the group metadata updates still overlap, and one chat
- * whose model rejects still rejects the whole read, as upstream does.
+ * The models and their order are unchanged and the group metadata updates still overlap. A group
+ * whose model fails one of WhatsApp Web's own invariants is served from the metadata the page already
+ * holds (see the fallback below), so one group WhatsApp Web cannot refresh no longer fails the whole
+ * list; any other rejection still rejects the whole read, as upstream does.
  */
 export async function readChatModels(): Promise<unknown[]> {
+  type PageChat = {
+    serialize: () => Record<string, unknown>;
+    mute?: { expiration?: number };
+    formattedTitle?: unknown;
+    groupMetadata?: { serialize: () => { participants?: { id: unknown }[] }; announce?: unknown };
+  };
   const w = window as unknown as {
-    require: (m: string) => { Chat: { getModelsArray: () => unknown[] } };
+    require: (m: string) => {
+      Chat: { getModelsArray: () => PageChat[] };
+      toPn: (id: unknown) => unknown;
+    };
     WWebJS: { getChatModel: (chat: unknown) => Promise<unknown> };
+  };
+  // A group's model refreshes its metadata from the server first (groupMetadata.update), and WhatsApp
+  // Web itself can throw while processing the reply: invariant 76137, raised by its device-list sync
+  // for a member whose hosted (coexistence) device lacks the hosted flag, fails one group on every
+  // read. Rebuild the model getChatModel would return from the metadata already loaded, without the
+  // last-message preview, so the group stays listed. The marker lets listChats report it. Only an
+  // invariant (WhatsApp Web rejecting its own data) is recovered: a logout, a network loss or any
+  // other failure still fails the read instead of answering every group from stale metadata. If even
+  // the local read throws, the original rejection stands.
+  const localGroupModel = (chat: PageChat, error: unknown): Record<string, unknown> => {
+    const failure = error as { name?: unknown; message?: unknown } | undefined;
+    const description = `${String(failure?.name)}: ${String(failure?.message ?? error)}`;
+    if (!chat?.groupMetadata || !/Invariant Violation|Minified invariant/.test(description)) throw error;
+    try {
+      const model = chat.serialize();
+      model.isGroup = true;
+      model.isMuted = chat.mute?.expiration !== 0;
+      model.formattedTitle = chat.formattedTitle;
+      const { toPn } = w.require('WAWebLidMigrationUtils');
+      const metadata = chat.groupMetadata.serialize();
+      for (const p of metadata.participants || []) p.id = toPn(p.id) ?? p.id;
+      model.groupMetadata = metadata;
+      model.isReadOnly = chat.groupMetadata.announce;
+      model.lastMessage = null;
+      delete model.msgs;
+      delete model.msgUnsyncedButtonReplyMsgs;
+      delete model.unsyncedButtonReplies;
+      model.metadataRefreshError = description.slice(0, 200);
+      return model;
+    } catch {
+      throw error;
+    }
   };
   // A copy: getModelsArray() is the collection's live array, which re-sorts on a new message and
   // grows on a new chat, so indexing it across the yields below would read one chat twice and skip
@@ -31,7 +75,8 @@ export async function readChatModels(): Promise<unknown[]> {
   const chats = w.require('WAWebCollections').Chat.getModelsArray().slice();
   const pending: Promise<unknown>[] = [];
   for (let i = 0; i < chats.length; i++) {
-    const model = w.WWebJS.getChatModel(chats[i]);
+    const chat = chats[i];
+    const model = w.WWebJS.getChatModel(chat).catch(error => localGroupModel(chat, error));
     // Handled here so a rejection that lands during a yield is not reported as unhandled; the
     // Promise.all below still rejects with it.
     model.catch(() => undefined);
@@ -58,6 +103,8 @@ function rethrowTransportFailure(
   activity: string,
   timedOutMessage = `WhatsApp Web did not answer in time while ${activity}`,
 ): void {
+  // A session that stopped during the lookup is the retryable 409, never a `false` refusal.
+  if (error instanceof EngineNotReadyError) throw error;
   rethrowIfNavigation(host, error);
   if (host.isPageTransportError(error)) {
     host.reportIfPageTransportError(error, context);
@@ -91,6 +138,20 @@ export async function listChats(host: WwebjsEngineHost, context: string): Promis
       'WhatsApp Web did not answer the chat list read in time',
     );
     throw error;
+  }
+  const local = models.filter(
+    data => typeof (data as { metadataRefreshError?: unknown }).metadataRefreshError === 'string',
+  );
+  if (local.length > 0) {
+    // Bounded: the list is polled, so name at most ten groups and each distinct error once.
+    host.logger.warn(`Listed ${local.length} group(s) from local metadata; WhatsApp Web could not refresh them`, {
+      context,
+      groups: local.slice(0, 10).map(data => (data as { id?: { _serialized?: string } }).id?._serialized),
+      errors: [...new Set(local.map(data => (data as { metadataRefreshError: string }).metadataRefreshError))].slice(
+        0,
+        3,
+      ),
+    });
   }
   return models.map(data =>
     (data as { isGroup?: boolean }).isGroup ? new GroupChat(client, data) : new PrivateChat(client, data),
@@ -165,6 +226,8 @@ export class WwebjsChats {
     this.host.ensureReady();
     try {
       const chat = await this.client().getChatById(chatId);
+      // The chat acts through its own client, which getClient's readiness check never sees again.
+      this.host.ensureReady();
       return await chat.sendSeen();
     } catch (error) {
       // A dead page is a 503 and an early death signal, not an opaque `false` (see rethrowTransportFailure).
@@ -181,6 +244,7 @@ export class WwebjsChats {
       // resulting TypeError lands in the catch below as the same `false` the injected helper
       // returns for a chat it cannot find. Same shape as sendSeen/archiveChat above.
       const chat = await this.client().getChatById(chatId);
+      this.host.ensureReady();
       return await chat.clearMessages();
     } catch (error) {
       // A dead page is a 503 and an early death signal, not an opaque `false` (see rethrowTransportFailure).
@@ -307,6 +371,7 @@ export class WwebjsChats {
     }
     try {
       const chat = await this.client().getChatById(chatId);
+      this.host.ensureReady();
       // Chat.markUnread() resolves void, so synthesize the boolean from a clean call.
       await chat.markUnread();
       return true;
@@ -327,6 +392,7 @@ export class WwebjsChats {
     }
     try {
       const chat = await this.client().getChatById(chatId);
+      this.host.ensureReady();
       return await chat.delete();
     } catch (error) {
       // A dead page is a 503 and an early death signal, not an opaque `false` (see rethrowTransportFailure).

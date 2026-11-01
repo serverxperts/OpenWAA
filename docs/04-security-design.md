@@ -807,7 +807,7 @@ updates:
       - dependency-name: 'better-sqlite3'
         versions: ['>=14.0.0']
       - dependency-name: 'puppeteer'
-        versions: ['>24.38.0']
+        versions: ['>=26.0.0']
       - dependency-name: 'audio-decode'
         versions: ['>=3.0.0']
       - dependency-name: '@types/node'
@@ -818,10 +818,10 @@ updates:
         versions: ['>=3.2.1']
 ```
 
-Majors arrive as their own grouped PR, separate from the minor/patch group. Five ignores freeze a
-major line (TypeScript 7, better-sqlite3 14, audio-decode 3, @types/node 23 and later, NestJS 12)
-and two freeze the line in use (puppeteer above the 24.38.0 pin it shares with whatsapp-web.js,
-tar-stream from 3.2.1). Each ignore's reason and lift condition is the comment above it in
+Majors arrive as their own grouped PR, separate from the minor/patch group. Six ignores freeze a
+major line (TypeScript 7, better-sqlite3 14, puppeteer 26, audio-decode 3, @types/node 23 and later,
+NestJS 12) and one freezes the line in use (tar-stream from 3.2.1); puppeteer stays on the 25.x line
+it shares with whatsapp-web.js. Each ignore's reason and lift condition is the comment above it in
 `.github/dependabot.yml`.
 
 ### Security Scanning in CI
@@ -868,7 +868,7 @@ jobs:
 
 ### Allowed/Blocked Packages
 
-Security pins for transitive dependencies live in the `overrides` field of `package.json` (for example `"multer": "2.4.0"` and `"ip-address": "^10.7.1"`), and the `audit` CI job gates regressions through `npm run check:audit` (see above). No install hook fetches an unpinned package: `postinstall` runs `npm ci` against the dashboard lockfile and the repository's own patch scripts.
+Security pins for transitive dependencies live in the `overrides` field of `package.json` (for example `"multer": "2.5.0"` and `"ip-address": "^10.7.1"`), and the `audit` CI job gates regressions through `npm run check:audit` (see above). No install hook fetches an unpinned package: `postinstall` runs `npm ci` against the dashboard lockfile and the repository's own patch scripts.
 
 ### Vulnerability Response Matrix
 

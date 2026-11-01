@@ -11,6 +11,8 @@ let MemoryRouter: (typeof import('react-router-dom'))['MemoryRouter'];
 let RoleContext: (typeof import('../hooks/useRole.tsx'))['RoleContext'];
 // Every URL the layout asked for.
 const requested: string[] = [];
+// What the update check answers, when a test sets it; otherwise it answers 404 like every other route.
+let updateCheck: object | null = null;
 
 // The window's width in CSS px. A media query sees it as it is; innerWidth is rounded to a whole pixel.
 let cssWidth = 1024;
@@ -78,6 +80,9 @@ before(async () => {
   })) as unknown as typeof window.matchMedia;
   globalThis.fetch = ((input: RequestInfo | URL) => {
     requested.push(String(input));
+    if (updateCheck && String(input).includes('/infra/update-check')) {
+      return Promise.resolve(new Response(JSON.stringify(updateCheck), { status: 200 }));
+    }
     return Promise.resolve(new Response(JSON.stringify({ message: 'unstubbed' }), { status: 404 }));
   }) as typeof fetch;
   const { i18nReady } = await import('../i18n/index.ts');
@@ -91,6 +96,7 @@ before(async () => {
 afterEach(() => {
   rtl.cleanup();
   requested.length = 0;
+  updateCheck = null;
 });
 
 after(() => rtl.cleanup());
@@ -101,11 +107,12 @@ test('the theme button can return to following the system', () => {
   const button = container.querySelector<HTMLButtonElement>('.appearance-menu .theme-toggle-btn')!;
   const seen = [button.textContent];
   for (let i = 0; i < 3; i++) {
+    const shown = button.textContent;
     const announced = button.getAttribute('aria-label');
     rtl.fireEvent.click(button);
     seen.push(button.textContent);
-    // The label names the state the click selects.
-    assert.equal(announced, `Switch to ${button.textContent}`);
+    // The name starts with the mode shown, then names the mode the click selects.
+    assert.equal(announced, `${shown}, Switch to ${button.textContent}`);
   }
   assert.deepEqual(seen, ['System', 'Light', 'Dark', 'System']);
   assert.equal(localStorage.getItem('openwa_theme'), 'system');
@@ -299,6 +306,8 @@ test('the phone drawer leaves Escape to a dialog above it and to a composition',
 
     rtl.fireEvent.keyDown(document.body, { key: 'Escape', isComposing: true });
     assert.ok(sidebar.classList.contains('open'), 'the Escape of a composition closed the drawer');
+    rtl.fireEvent.keyDown(document.body, { key: 'Escape', keyCode: 229 });
+    assert.ok(sidebar.classList.contains('open'), 'an Escape the input method processed closed the drawer');
 
     document.body.appendChild(dialog);
     assert.equal(rtl.fireEvent.keyDown(document.body, { key: 'Escape' }), true, 'the drawer took the Escape');
@@ -334,6 +343,14 @@ test('an unscoped admin key still checks for a newer release', async () => {
   renderLayout();
   assert.ok(rtl.screen.getByRole('link', { name: 'Plugins' }));
   await rtl.waitFor(() => assert.ok(requested.some(url => url.includes('/infra/update-check'))));
+});
+
+// Beside the collapse button a long notice is cut with an ellipsis (Layout.css), so a pointer gets the whole text too.
+test('the update notice keeps its whole text in its title as well as its name', async () => {
+  updateCheck = { current: '0.26.0', latest: '0.27.0', updateAvailable: true, releaseUrl: 'https://example.test/r' };
+  renderLayout();
+  const link = await rtl.screen.findByRole('link', { name: 'v0.27.0 available' });
+  assert.equal(link.getAttribute('title'), 'v0.27.0 available');
 });
 
 // The sidebar offers the Number Checker to every role; a viewer key gets the page with its Check buttons disabled.

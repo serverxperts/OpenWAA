@@ -369,7 +369,11 @@ export class BaileysGroups {
   async getGroupInviteCode(groupId: string): Promise<string> {
     this.host.ensureReady();
     const code = await this.groupWrite(groupId, 'Fetching the group invite code', () =>
-      this.sock().groupInviteCode(groupId),
+      withQueryDeadline(
+        this.sock().groupInviteCode(groupId),
+        this.queryBudgetMs,
+        'WhatsApp did not answer the group invite-code query in time',
+      ),
     );
     if (!code) {
       throw new EngineTransportError('WhatsApp did not answer the group invite-code query');
@@ -379,8 +383,14 @@ export class BaileysGroups {
 
   async revokeGroupInviteCode(groupId: string): Promise<string> {
     this.host.ensureReady();
+    // Bounded like the read: a revoke WhatsApp applies after the deadline only mints a code nobody holds,
+    // and a retry mints another.
     const code = await this.groupWrite(groupId, 'Revoking the group invite code', () =>
-      this.sock().groupRevokeInvite(groupId),
+      withQueryDeadline(
+        this.sock().groupRevokeInvite(groupId),
+        this.queryBudgetMs,
+        'WhatsApp did not answer the group invite-code revocation in time',
+      ),
     );
     if (!code) {
       throw new EngineTransportError('WhatsApp did not answer the group invite-code revocation');
@@ -551,6 +561,17 @@ export class BaileysGroups {
     this.host.ensureReady();
     await this.groupWrite(groupId, 'Setting the disappearing-message timer', () =>
       this.confirmed(this.sock().groupToggleEphemeral(groupId, durationSec), 'the disappearing-message timer change'),
+    );
+  }
+
+  /**
+   * Not an IQ: `updateMemberLabel` relays a GROUP_MEMBER_LABEL_CHANGE protocol message to the group and
+   * resolves with its message id once sent, so a 4xx here is the group lookup the relay depends on.
+   */
+  async setGroupMemberLabel(groupId: string, label: string): Promise<void> {
+    this.host.ensureReady();
+    await this.groupWrite(groupId, 'Setting the member label', () =>
+      this.confirmed(this.sock().updateMemberLabel(groupId, label), 'the member label change'),
     );
   }
 

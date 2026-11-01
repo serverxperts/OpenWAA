@@ -1,6 +1,6 @@
 # rmyndharis/openwa
 
-This document describes SDK 0.7.0. Send idempotency, webhook failure redrive, message-window filters, poll choices, last-message types, and the `event.response` webhook event name require OpenWA 0.25.0 or later.
+This document describes `main`. `groups->setMemberLabel` and the `match` search key are unreleased additions after SDK 0.7.0 and require OpenWA 0.27.0 or later. Send idempotency, webhook failure redrive, message-window filters, poll choices, last-message types, and the `event.response` webhook event name require OpenWA 0.25.0 or later.
 
 Official PHP SDK for [OpenWA](https://github.com/rmyndharis/OpenWA), the open-source WhatsApp API Gateway. OpenWA is an independent project, not affiliated with or endorsed by WhatsApp or Meta.
 
@@ -80,14 +80,15 @@ seconds when only sends still in flight caused it, the rest of the failure break
 (`SEND_PACING_BREAKER_COOLDOWN_MS`, 15 minutes by default) after a run of send failures, otherwise
 up to the next UTC day. `getHeaders()` returns the response headers. A 503 does not always prove a
 write was never carried out: when WhatsApp timed out, the change may still have been applied, so
-re-read the state before repeating it. A throttle on a send or a single write is the exception: it
-was turned away before it ran, so nothing was sent or applied, and a keyed send frees its
-`Idempotency-Key`. A group settings update with several fields applies them one at a time, so a 503
-on a later field, a throttle included, leaves the earlier ones applied; its message lists them after
-`already applied:`, so re-read the settings before retrying, or send one field per request. In a
-routed deployment a forward that fails before reaching the owner node answers 503, one that fails
-after the request reached it answers 502 or 504, and a 503 from the owner itself is relayed
-unchanged.
+re-read the state before repeating it. A throttle on a send or a single write was turned away before
+it ran, so nothing was sent or applied; a send also sent nothing when its recipient lookup failed,
+its connection closed before the message was written, or its media or preview image URL could not be
+fetched through the session's proxy. Each of these frees a keyed send's `Idempotency-Key`. A group
+settings update with several fields applies them one at a time, so a 503 on a later field, a
+throttle included, leaves the earlier ones applied; its message lists them after `already applied:`,
+so re-read the settings before retrying, or send one field per request. In a routed deployment a
+forward that fails before reaching the owner node answers 503, one that fails after the request
+reached it answers 502 or 504, and a 503 from the owner itself is relayed unchanged.
 
 Guzzle's stream handler, which Guzzle uses on a host without `ext-curl`, throws a plain Guzzle exception
 when a gateway stays silent past the timeout, before the response headers on either Guzzle major and, on
@@ -101,6 +102,14 @@ on Guzzle 7 the wait for the response headers is still ended by PHP's `default_s
 default), which surfaces as a `GuzzleHttp\Exception\ConnectException`: catch
 `GuzzleHttp\Exception\TransferException` as well as `OpenWATimeoutException` if the application sets
 `timeout` to `0` on such a host.
+
+A body that ends before the `Content-Length` it declares, such as a media download the gateway cut off
+when its store failed mid-read, is a failed transfer raised as a `GuzzleHttp\Exception\TransferException`:
+cURL and Guzzle 8 raise their own, and on Guzzle 7's stream handler, which returns such a body as if it
+were whole, the SDK raises a `RequestException` naming the request and the byte counts. That handler
+still returns two cut bodies without an error, because neither carries a length to compare with: a
+chunked body (the gateway sends a `Content-Length` with media whenever the store reports a size) and a
+compressed body the application asked for with its own `Accept-Encoding` default header.
 
 ```php
 use OpenWA\Exceptions\OpenWANotFoundException;

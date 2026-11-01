@@ -218,12 +218,17 @@ class GroupJoinInfo(TypedDict):
 
 
 class CustomLinkPreview(TypedDict):
-    """A caller-supplied link preview. Nothing is fetched for these."""
+    """A caller-supplied link preview. The page is not fetched; only thumbnailUrl, when given, is."""
 
     url: str
     # Required -- WhatsApp will not render a preview without a title.
     title: str
     description: NotRequired[str]
+    # Preview image as an http(s) URL, fetched under the media SSRF rules; renders the large card.
+    # At most 5 MiB.
+    thumbnailUrl: NotRequired[str]
+    # Preview image as base64, at most 5 MiB decoded. Wins over thumbnailUrl.
+    thumbnailBase64: NotRequired[str]
 
 
 # ── Session ───────────────────────────────────────────────────────
@@ -364,9 +369,10 @@ class SendTextRequest(TypedDict):
     # whatsapp-web.js builds one in-page by default, while on Baileys a preview is OPT-IN -- it needs
     # True, because generating one is a blocking outbound fetch per URL.
     linkPreview: NotRequired[bool]
-    # Attach a preview you supply yourself instead of one fetched from the URL. Nothing is fetched,
-    # so this works even for a URL the gateway cannot reach. Baileys only -- whatsapp-web.js takes a
-    # boolean and answers 501. Cannot be combined with linkPreview=False.
+    # Attach a preview you supply yourself instead of one fetched from the URL. The page is not
+    # fetched, so this works even for a URL the gateway cannot reach; only thumbnailUrl, when given,
+    # is. Baileys only -- whatsapp-web.js takes a boolean and answers 501. Cannot be combined with
+    # linkPreview=False.
     customLinkPreview: NotRequired[CustomLinkPreview]
     # Quote an earlier message, turning this send into a reply. Engine-specific: whatsapp-web.js
     # matches the serialized message id, Baileys the raw key id of a message it has already stored.
@@ -1012,9 +1018,10 @@ class WebhookDeliveryFailure(TypedDict):
     lastError: str
     # ISO timestamp of when the failure was first recorded.
     createdAt: str
-    # True when the row still holds the event data and can be replayed with
-    # WebhooksResource.redrive_delivery_failures: a terminal row (attempts > 0) recorded while the
-    # gateway's WEBHOOK_FAILURE_PAYLOAD_RETENTION_HOURS is above 0, until that window passes.
+    # True when the row still holds the event data and its webhook still exists in the same session: a
+    # terminal row (attempts > 0) recorded while the gateway's WEBHOOK_FAILURE_PAYLOAD_RETENTION_HOURS is
+    # above 0, until that window passes. WebhooksResource.redrive_delivery_failures replays it while that
+    # webhook is active and subscribed to the event.
     replayable: bool
 
 
@@ -1042,9 +1049,10 @@ class WebhookRedriveResult(TypedDict):
     enqueued: int
     # Replays that failed again; their rows stay, with attempts raised by one.
     failed: int
-    # Rows not replayed: the webhook was removed, disabled or unsubscribed, or a plugin cancelled it.
+    # Selected rows not replayed: a hook cancelled the replay, or the row or its webhook changed during the
+    # call. Rows of a removed, disabled or unsubscribed webhook are left out before the batch and not counted.
     skipped: int
-    # Replayable rows still in scope after this call.
+    # Rows the redrive would still take after this call: replayable, in scope, with an active subscribed webhook.
     remaining: int
 
 
@@ -1083,9 +1091,9 @@ class MarkChatReadRequest(TypedDict):
     # Body for mark_read.
     chatId: Jid
     # Messages to acknowledge (at most 100; an empty list is refused). Baileys acknowledges
-    # individual messages, so without this only the newest received message the engine still
-    # holds in memory gets a receipt. Ignored by whatsapp-web.js, whose own sendSeen is
-    # chat-level.
+    # individual messages, so without this only the newest received message gets a receipt:
+    # the one the engine holds in memory, else the newest received one the gateway stored.
+    # Ignored by whatsapp-web.js, whose own sendSeen is chat-level.
     messageIds: NotRequired[list[str]]
 
 
@@ -1472,9 +1480,13 @@ class _SearchQueryRequired(TypedDict):
     q: str
 
 
+# `match` is "word" (the server default: whole words) or "contains" (any part
+# of a word, ignoring case and accents; needs a term of 3+ characters, and a
+# server with SEARCH_CONTAINS_ENABLED=true, else 501).
 _SearchQueryOptional = TypedDict(
     "_SearchQueryOptional",
     {
+        "match": Literal["word", "contains"],
         "sessionId": str,
         "chatId": Jid,
         "direction": MessageDirection,

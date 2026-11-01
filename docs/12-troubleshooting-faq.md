@@ -267,8 +267,8 @@ QR string and the pairing-code request straight through to those libraries. Ther
 fix, and nothing on the client side changes the outcome: switching engine, using a pairing code instead
 of a QR, or presenting a different client identity (`BAILEYS_BROWSER_NAME` or otherwise) all end at the
 same gate. Re-registering the number as a different account type has also been tried by the community
-and did not hold; the block returned on its own within days. Tracked in
-[#560](https://github.com/rmyndharis/OpenWA/issues/560) and upstream in
+and did not hold; the block returned on its own within days. Background in
+[#560](https://github.com/rmyndharis/OpenWA/issues/560), upstream work in
 [WhiskeySockets/Baileys#2672](https://github.com/WhiskeySockets/Baileys/issues/2672); the only durable
 change will come from the engine libraries implementing the step.
 
@@ -501,7 +501,7 @@ custom container that drops the `XDG_CONFIG_HOME` / `XDG_CACHE_HOME` setup or th
 
 **Cause D — Debian 12 OS Chromium SIGTRAP in non-root Pods.**
 If `Code: null` happens on Kubernetes, and the host kernel logs or `dmesg` shows `Trace/breakpoint trap (core dumped)` with exit code 133, the underlying Debian 12 OS `chromium` package has crashed due to strict non-root or seccomp constraints (even with `--no-zygote` or `Unconfined` seccomp).
-_Fix:_ On amd64, do not use the `chromium` package from Debian's `apt` — it SIGTRAPs under strict non-root/seccomp. Instead, download Chrome for Testing via Puppeteer during the Docker build (`./node_modules/.bin/puppeteer browsers install 'chrome@156.0.8078.47'`) and point `PUPPETEER_EXECUTABLE_PATH` to it. (arm64 keeps Debian's `chromium`, which ships a native arm64 binary, by choice: Chrome for Testing publishes linux-arm64 builds only from 153, and the image has not moved arm64 to one.) The official `Dockerfile` implements this mixed approach.
+_Fix:_ On amd64, do not use the `chromium` package from Debian's `apt` — it SIGTRAPs under strict non-root/seccomp. Instead, download Chrome for Testing via Puppeteer during the Docker build (`./node_modules/.bin/puppeteer browsers install 'chrome@156.0.8078.80'`) and point `PUPPETEER_EXECUTABLE_PATH` to it. (arm64 keeps Debian's `chromium`, which ships a native arm64 binary, by choice: Chrome for Testing publishes linux-arm64 builds only from 153, and the image has not moved arm64 to one.) The official `Dockerfile` implements this mixed approach.
 
 **Quick triage:** run `docker stats openwa-api`, click **Start**, and watch which resource spikes toward its
 limit the instant before the failure — that tells you A vs B. If neither moves and you see the crashpad
@@ -1149,9 +1149,6 @@ npm run migration:show
 # Run all pending migrations
 npm run migration:run
 
-# Rollback last migration
-npm run migration:revert
-
 # Inside the released image, which has no ts-node, use the :prod variants against dist/
 docker compose run --rm openwa-api npm run migration:show:prod
 docker compose run --rm openwa-api npm run migration:run:prod
@@ -1161,6 +1158,8 @@ docker compose run --rm openwa-api npm run migration:run:prod
 npm run migration:run:main
 npm run migration:run:main:prod   # inside the released image
 ```
+
+A failed migration is not recorded: the run executes in one transaction, so the failure rolls back that migration and the rest of the same run, and `migration:show` still lists them as pending. Fix what made it fail and run the migrations again; do not run `migration:revert` for it, which runs the `down()` of the newest migration that succeeded, a downgrade step ([14.6](./14-migration-guide.md#146-rollback-procedures)) that can delete data.
 
 **PostgreSQL crash-loop on boot after upgrade** — if logs show `column "id" is of type uuid but default expression is of type character varying` or `foreign key constraint ... cannot be implemented ... incompatible types: character varying and uuid`, the deployment was previously bootstrapped with `DATABASE_SYNCHRONIZE=true` (native `uuid` columns vs the migrations' `varchar`). A guard migration converts the columns automatically on the next boot; for large `messages` tables, run the migration against the stopped app (`npm run migration:run` from a source checkout, `npm run migration:run:prod` in the image) during a maintenance window. See [14.5 / 14.9 — PostgreSQL crash-loop after upgrading a `DATABASE_SYNCHRONIZE=true` deployment](./14-migration-guide.md). `DATABASE_SYNCHRONIZE=true` is unsupported on PostgreSQL for production.
 

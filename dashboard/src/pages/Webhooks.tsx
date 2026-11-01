@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Plus,
@@ -20,6 +20,7 @@ import { filterValueLabel } from '../utils/enumLabels';
 import { buildHeaderMap, generateSecret, secretError, type HeaderRow } from '../utils/webhookAuth';
 import { copyToClipboard } from '../utils/clipboard';
 import { filtersIncomplete } from '../utils/webhookFilters';
+import { isComposingKey } from '../utils/composition';
 import { useRole } from '../hooks/useRole';
 import { useToast } from '../hooks/useToast';
 import {
@@ -85,6 +86,19 @@ function FilterBadge({ filters }: { filters: WebhookFilters }) {
       left: `${Math.min(Math.max(margin, anchor.left), window.innerWidth - width - margin)}px`,
     });
   }, [anchor]);
+
+  // Escape puts the popover away without moving the pointer or focus, whether hover or focus opened it.
+  const isOpen = anchor !== null;
+  useEffect(() => {
+    if (!isOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || isComposingKey(event) || event.defaultPrevented) return;
+      event.preventDefault();
+      setAnchor(null);
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [isOpen]);
 
   return (
     <span
@@ -331,7 +345,11 @@ export function Webhooks() {
       if (result.success) {
         toast.success(t('webhooks.toasts.testOk', { status: result.statusCode }));
       } else {
-        toast.error(t('webhooks.toasts.testFailed', { message: result.error || `Status ${result.statusCode}` }));
+        toast.error(
+          t('webhooks.toasts.testFailed', {
+            message: result.error || t('webhooks.toasts.testStatus', { status: result.statusCode }),
+          }),
+        );
       }
     } catch (err) {
       toast.error(
@@ -489,6 +507,7 @@ export function Webhooks() {
                 <button
                   key={name}
                   type="button"
+                  aria-pressed={isSelected}
                   className={`event-tag ${isSelected ? 'selected' : ''}`}
                   onClick={() => toggleNewEvent(name)}
                 >
@@ -577,6 +596,7 @@ export function Webhooks() {
                 <button
                   key={name}
                   type="button"
+                  aria-pressed={isSelected}
                   className={`event-tag ${isSelected ? 'selected' : ''}`}
                   onClick={() => toggleEditEvent(name)}
                 >
