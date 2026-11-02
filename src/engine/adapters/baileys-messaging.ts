@@ -25,7 +25,7 @@ import {
 } from '../interfaces/whatsapp-engine.interface';
 import { refusedStatusCode, toEngineParticipants } from './baileys-groups';
 import { findSelfParticipant } from './baileys-group-mapper';
-import { buildVCard } from './vcard';
+import { buildVCard, stripLineBreaks } from './vcard';
 import {
   baileysChatJid,
   isBaileysCatalogShare,
@@ -44,9 +44,9 @@ import { EngineTransportError } from '../../common/errors/engine-transport.error
 import { EngineThrottledError } from '../../common/errors/engine-throttled.error';
 import { EngineNotSentError, markNothingSent } from '../../common/errors/engine-not-sent.error';
 import { parseWaId, userPart } from '../identity/wa-id';
-import { BAILEYS_QUERY_BUDGET_MS, confirmedWrite, withQueryDeadline } from './baileys-query-deadline';
+import { BAILEYS_QUERY_BUDGET_MS, confirmedWrite, guardLookup, withQueryDeadline } from './baileys-query-deadline';
 import { ConcurrencyLimiter } from '../../common/utils/concurrency-limiter';
-import { describeAudio } from './baileys-audio-probe';
+import { describeAudio, describeVideo } from './baileys-audio-probe';
 
 /**
  * Messaging-domain operations extracted from BaileysAdapter. The adapter keeps the public
@@ -131,13 +131,16 @@ function isWebpBuffer(data: Buffer): boolean {
  * Load the deferred `sharp` binary, mapping a LOAD failure to a 500 rather than the decode path's 400.
  * A native-binary load failure (older CPU, stripped/musl image, missing prebuilt) is a host capability
  * gap: a valid PNG would hit it too, so reporting it as a 400 tells the caller their image is malformed.
+ * Every caller loads it before anything is written, so the 500 carries markNothingSent.
  */
 export async function loadSharp() {
   try {
     return (await import('sharp')).default;
   } catch (error) {
-    throw new InternalServerErrorException(
-      `Sticker conversion is unavailable: sharp could not load (${error instanceof Error ? error.message : String(error)}).`,
+    throw markNothingSent(
+      new InternalServerErrorException(
+        `Sticker conversion is unavailable: sharp could not load (${error instanceof Error ? error.message : String(error)}).`,
+      ),
     );
   }
 }
@@ -368,21 +371,24 @@ export class BaileysMessaging {
   private sock(expected?: WASocket): WASocket {
     let socket: WASocket;
     try {
+      this.host.ensureReady();
       socket = this.host.getSocket();
     } catch (error) {
       throw markNothingSent(error);
     }
-    if (expected && socket !== expected) throw markNothingSent(new EngineNotReadyError());
+    if (
+      expected &&
+      (socket !== expected ||
+        (typeof this.host.getSocketOrNull === 'function' && this.host.getSocketOrNull() !== expected))
+    ) {
+      throw markNothingSent(new EngineNotReadyError());
+    }
     return socket;
   }
 
   /** The readiness check that opens a send: nothing is written yet, so its 409 carries markNothingSent. */
-  private ensureReadyToSend(): void {
-    try {
-      this.host.ensureReady();
-    } catch (error) {
-      throw markNothingSent(error);
-    }
+  private ensureReadyToSend(expected?: WASocket): WASocket {
+    return this.sock(expected);
   }
 
   /**
@@ -399,6 +405,7 @@ export class BaileysMessaging {
    */
   private async previewThumbnail(
     preview: CustomLinkPreview,
+    expected?: WASocket,
   ): Promise<{ jpegThumbnail?: Buffer; highQualityThumbnail?: BaileysLib.proto.Message.IImageMessage }> {
     let data: Buffer;
     if (preview.thumbnailBase64) {
@@ -413,21 +420,25 @@ export class BaileysMessaging {
     await assertReadableImage(data);
     const image = await toPreviewJpeg(data);
     const lib = await this.host.loadLib();
+    const sock = this.sock(expected);
     try {
       const { imageMessage } = await lib.prepareWAMessageMedia(
         { image },
         {
-          upload: this.sock().waUploadToServer,
+          upload: sock.waUploadToServer,
           mediaTypeOverride: 'thumbnail-link',
           mediaUploadTimeoutMs: this.uploadTimeoutMs(),
         },
       );
+      this.sock(sock);
       if (!imageMessage) return {};
       return {
         ...(imageMessage.jpegThumbnail ? { jpegThumbnail: Buffer.from(imageMessage.jpegThumbnail) } : {}),
         highQualityThumbnail: imageMessage,
       };
     } catch (error) {
+      this.sock(sock);
+      if (error instanceof EngineNotReadyError) throw markNothingSent(error);
       this.host.logger.warn('Link preview image upload failed; sending the preview without it', {
         error: error instanceof Error ? error.message : String(error),
       });
@@ -441,8 +452,8 @@ export class BaileysMessaging {
     mentions?: string[],
     sendOptions?: { linkPreview?: boolean; customPreview?: CustomLinkPreview } & Quotable,
   ): Promise<MessageResult> {
-    this.ensureReadyToSend();
-    const jid = await this.toDeliverableJid(chatId);
+    const socket = this.ensureReadyToSend();
+    const jid = await this.toDeliverableJid(chatId, socket);
     // Baileys spreads the caller's options LAST (messages-send.js:1086), so `getUrlInfo` here
     // replaces its hardcoded one — which delegates to a package carrying an unfixed SSRF advisory
     // (see safe-link-preview.ts). Passed on every text send so that generator is never reachable,
@@ -452,7 +463,7 @@ export class BaileysMessaging {
       getUrlInfo: (text: string) => generateSafeLinkPreview(text, { sessionProxyUrl: this.host.sessionProxyUrl() }),
       // Merged rather than assigned: getUrlInfo above must survive, or the library's own vulnerable
       // preview generator becomes reachable again on quoted sends only.
-      ...((await this.quoteOption(sendOptions?.quotedMessageId)) ?? {}),
+      ...((await this.quoteOption(sendOptions?.quotedMessageId, socket)) ?? {}),
     };
     // `linkPreview: null` is Baileys' explicit "no preview": with the key absent it instead calls the
     // configured generator (Utils/messages.js:279-281), which for us means a blocking outbound fetch
@@ -480,12 +491,12 @@ export class BaileysMessaging {
               'canonical-url': sendOptions.customPreview.url,
               title: sendOptions.customPreview.title,
               ...(sendOptions.customPreview.description ? { description: sendOptions.customPreview.description } : {}),
-              ...(await this.previewThumbnail(sendOptions.customPreview)),
+              ...(await this.previewThumbnail(sendOptions.customPreview, socket)),
             },
           }
         : {}),
     });
-    const sent = await this.send(jid, content, options);
+    const sent = await this.send(jid, content, options, socket);
     if (sent) {
       void this.host.putStoredMessage(sent)?.catch(err =>
         this.host.logger.warn('Failed to persist sent message to store', {
@@ -508,10 +519,13 @@ export class BaileysMessaging {
 
   async getNumberId(number: string): Promise<string | null> {
     this.host.ensureReady();
-    const results = await withQueryDeadline(
-      this.sock().onWhatsApp(number),
-      this.queryBudgetMs,
-      'WhatsApp did not answer the number-check query in time',
+    const results = await guardLookup(
+      withQueryDeadline(
+        this.sock().onWhatsApp(number),
+        this.queryBudgetMs,
+        'WhatsApp did not answer the number-check query in time',
+      ),
+      'The number check',
     );
     // onWhatsApp has no else branch after `if (results)`, so it resolves undefined when the usync
     // query goes unanswered — and Baileys' query() swallows its own timeout rather than throwing.
@@ -581,10 +595,17 @@ export class BaileysMessaging {
    * priced in thousandths (priceAmount1000) and whose image is handed to Baileys as a URL upload.
    * The card needs an image — a product whose catalog entry has none cannot be sent this way.
    */
-  async sendProductMessage(chatId: string, product: Product, body?: string): Promise<MessageResult> {
-    this.host.ensureReady();
+  async sendProductMessage(
+    chatId: string,
+    product: Product,
+    body?: string,
+    expected?: WASocket,
+  ): Promise<MessageResult> {
+    const socket = this.ensureReadyToSend(expected);
     if (!product.imageUrl) {
-      throw new BadRequestException(`Product ${product.id} has no image — a product card requires one`);
+      throw markNothingSent(
+        new BadRequestException(`Product ${product.id} has no image — a product card requires one`),
+      );
     }
     const content: AnyMessageContent = {
       product: {
@@ -600,11 +621,11 @@ export class BaileysMessaging {
       businessOwnerJid: this.host.toEngineJid(this.host.normalizedSelfJid()),
       body,
     };
-    return this.sendContent(chatId, content);
+    return this.sendContent(chatId, content, undefined, socket);
   }
 
   async sendImageMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
-    this.ensureReadyToSend();
+    const socket = this.ensureReadyToSend();
     const { data, mimetype } = await resolveMediaBuffer(media, this.host.sessionProxyUrl(), 'image/jpeg');
     return this.sendContent(
       chatId,
@@ -614,12 +635,13 @@ export class BaileysMessaging {
         mimetype,
         ...this.withMentions(media.mentions),
       },
-      await this.quoteOption(media.quotedMessageId),
+      await this.quoteOption(media.quotedMessageId, socket),
+      socket,
     );
   }
 
   async sendVideoMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
-    this.ensureReadyToSend();
+    const socket = this.ensureReadyToSend();
     const { data, mimetype } = await resolveMediaBuffer(media, this.host.sessionProxyUrl(), 'video/mp4');
     return this.sendContent(
       chatId,
@@ -627,14 +649,17 @@ export class BaileysMessaging {
         video: data,
         caption: media.caption,
         mimetype,
+        // Made outside Baileys, which would otherwise run ffmpeg on the file itself (see describeVideo).
+        ...(await describeVideo(data)),
         ...this.withMentions(media.mentions),
       },
-      await this.quoteOption(media.quotedMessageId),
+      await this.quoteOption(media.quotedMessageId, socket),
+      socket,
     );
   }
 
   async sendAudioMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
-    this.ensureReadyToSend();
+    const socket = this.ensureReadyToSend();
     const { data, mimetype } = await resolveMediaBuffer(media, this.host.sessionProxyUrl(), 'audio/mpeg');
     const ptt = media.ptt ?? false;
     return this.sendContent(
@@ -646,12 +671,13 @@ export class BaileysMessaging {
       // The duration and a voice note's waveform come from describeAudio, never from Baileys, which
       // would read the file in this process.
       { audio: data, mimetype, ptt, ...(await describeAudio(data, ptt)), ...this.withMentions(media.mentions) },
-      await this.quoteOption(media.quotedMessageId),
+      await this.quoteOption(media.quotedMessageId, socket),
+      socket,
     );
   }
 
   async sendDocumentMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
-    this.ensureReadyToSend();
+    const socket = this.ensureReadyToSend();
     const { data, mimetype } = await resolveMediaBuffer(media, this.host.sessionProxyUrl(), 'application/octet-stream');
     return this.sendContent(
       chatId,
@@ -662,7 +688,8 @@ export class BaileysMessaging {
         caption: media.caption,
         ...this.withMentions(media.mentions),
       },
-      await this.quoteOption(media.quotedMessageId),
+      await this.quoteOption(media.quotedMessageId, socket),
+      socket,
     );
   }
 
@@ -695,7 +722,7 @@ export class BaileysMessaging {
   }
 
   async sendStickerMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
-    this.ensureReadyToSend();
+    const socket = this.ensureReadyToSend();
     const { data, mimetype } = await resolveMediaBuffer(media, this.host.sessionProxyUrl());
     // A sticker has neither text nor caption, but stickerMessage carries a contextInfo like every
     // other content type, so a mention still tags the participant. The route accepts the field
@@ -704,12 +731,13 @@ export class BaileysMessaging {
     return this.sendContent(
       chatId,
       { sticker: await toWebpSticker(data, mimetype), ...this.withMentions(media.mentions) },
-      await this.quoteOption(media.quotedMessageId),
+      await this.quoteOption(media.quotedMessageId, socket),
+      socket,
     );
   }
 
   async sendLocationMessage(chatId: string, location: LocationInput): Promise<MessageResult> {
-    this.ensureReadyToSend();
+    const socket = this.ensureReadyToSend();
     return this.sendContent(
       chatId,
       {
@@ -720,23 +748,29 @@ export class BaileysMessaging {
           address: location.address,
         },
       },
-      await this.quoteOption(location.quotedMessageId),
+      await this.quoteOption(location.quotedMessageId, socket),
+      socket,
     );
   }
 
   async sendContactMessage(chatId: string, contact: ContactCard): Promise<MessageResult> {
-    this.ensureReadyToSend();
+    const socket = this.ensureReadyToSend();
     return this.sendContent(
       chatId,
       {
-        contacts: { displayName: contact.name, contacts: [{ vcard: buildVCard(contact) }] },
+        // A single card is built from the entry alone, so the entry carries the name the bubble shows.
+        contacts: {
+          displayName: contact.name,
+          contacts: [{ displayName: stripLineBreaks(contact.name), vcard: buildVCard(contact) }],
+        },
       },
-      await this.quoteOption(contact.quotedMessageId),
+      await this.quoteOption(contact.quotedMessageId, socket),
+      socket,
     );
   }
 
   async sendPollMessage(chatId: string, poll: PollInput): Promise<MessageResult> {
-    this.ensureReadyToSend();
+    const socket = this.ensureReadyToSend();
     // selectableCount 1 = single choice; 0 = no limit, which is how WhatsApp expresses
     // "allow multiple answers". Baileys generates the poll's messageSecret itself.
     return this.sendContent(
@@ -748,7 +782,8 @@ export class BaileysMessaging {
           selectableCount: poll.allowMultipleAnswers ? 0 : 1,
         },
       },
-      await this.quoteOption(poll.quotedMessageId),
+      await this.quoteOption(poll.quotedMessageId, socket),
+      socket,
     );
   }
 
@@ -902,6 +937,19 @@ export class BaileysMessaging {
         `the edit of message ${messageId} was rejected — only the account's own messages can be edited`,
       );
     }
+    // WhatsApp edits a text or the caption of a photo, video or document: the slots setBaileysText writes. The
+    // edit of anything else resolved all the same, and the stored body took the new text while recipients kept
+    // the original. whatsapp-web.js refuses it from the page.
+    const b = await this.host.loadLib();
+    const content = b.normalizeMessageContent(target.message ?? undefined);
+    if (
+      typeof content?.conversation !== 'string' &&
+      !(content?.extendedTextMessage ?? content?.imageMessage ?? content?.videoMessage ?? content?.documentMessage)
+    ) {
+      throw new EngineRefusedError(
+        `the edit of message ${messageId} was rejected: only a text or a caption can be edited`,
+      );
+    }
     // An edit keeps the original message id, so it is neither re-persisted nor echoed as a new send.
     // The destination is resolved like any other send: a lid-migrated contact rejects PN-addressed
     // sends with ack error 463 (see toDeliverableJid).
@@ -912,7 +960,6 @@ export class BaileysMessaging {
     // protocolMessage edit envelope, so an edit can re-tag participants. An edit REPLACES the
     // content, so omitting mentions drops whatever tags the original carried.
     const editContent = { text: body, ...this.withMentions(mentions), edit: target.key };
-    const b = await this.host.loadLib();
     await this.send(jid, this.previewSafe(editContent), this.previewSafeOptions(editContent), socket);
     // Update the preview and raw copy immediately, ahead of the buffered echo.
     this.host.recordMessageEdit(target.key.remoteJid ?? chatId, messageId, body);
@@ -947,19 +994,18 @@ export class BaileysMessaging {
    * canonical Baileys domain; the library does not rewrite a neutral @c.us destination.
    */
   private async toDeliverableJid(chatId: string, expected?: WASocket): Promise<string> {
-    if (expected) this.sock(expected);
+    const sock = this.sock(expected);
     const { kind, userPart: user } = parseWaId(chatId);
     if (kind === 'lid') return `${user}@lid`;
     if (kind !== 'user') return chatId;
     const pn = this.host.toEngineJid(chatId);
-    const sock = this.sock();
     try {
       const lid = await withQueryDeadline(
         Promise.resolve(sock.signalRepository?.lidMapping?.getLIDForPN(pn)),
         this.queryBudgetMs,
         'WhatsApp did not answer the recipient LID lookup in time',
       );
-      if (this.host.getSocketOrNull() !== sock) throw markNothingSent(new EngineNotReadyError());
+      this.sock(sock);
       // Record what the socket just told us. This resolution is the one place a cold contact's lid
       // becomes known before any message arrives, and without writing it back the session store
       // still believes the two ids are unrelated — which makes an ownership check comparing the
@@ -967,8 +1013,9 @@ export class BaileysMessaging {
       if (lid) this.host.recordLidMapping(`${userPart(lid)}@lid`, pn, false);
       return lid ? `${userPart(lid)}@lid` : pn;
     } catch (error) {
-      if (this.host.getSocketOrNull() !== sock || error instanceof EngineNotReadyError) {
-        throw markNothingSent(new EngineNotReadyError());
+      this.sock(sock);
+      if (error instanceof EngineNotReadyError) {
+        throw markNothingSent(error);
       }
       if (error instanceof EngineTransportError) throw new EngineNotSentError(error.message);
       return pn; // LID resolution is best-effort; the phone destination must still be canonical.
@@ -1093,22 +1140,29 @@ export class BaileysMessaging {
     expected?: WASocket,
   ): Promise<WAMessage | undefined> {
     const sock = this.sock(expected);
-    if (parseWaId(jid).kind === 'user') {
+    const recipient = parseWaId(jid);
+    // An id with a stray '@' or no user before it parses as unknown with no user part, which would skip the
+    // registered-recipient check below and hand the raw id to the socket.
+    if (recipient.kind === 'unknown' && !recipient.userPart && jid.includes('@')) {
+      throw markNothingSent(new BadRequestException(`Recipient ${jid} is not a valid WhatsApp id`));
+    }
+    if (recipient.kind === 'user') {
       let numberId: string | null;
       try {
         numberId = await this.getNumberId(jid);
       } catch (error) {
-        if (this.host.getSocketOrNull() !== sock) throw markNothingSent(new EngineNotReadyError());
+        this.sock(sock);
+        if (error instanceof EngineNotReadyError) throw markNothingSent(error);
         throw new EngineNotSentError(`WhatsApp could not check the recipient before send: ${String(error)}`);
       }
-      if (this.host.getSocketOrNull() !== sock) throw markNothingSent(new EngineNotReadyError());
+      this.sock(sock);
       if (!numberId)
         throw markNothingSent(new BadRequestException(`WhatsApp reports recipient ${jid} is not registered`));
       const canonical = this.host.toEngineJid(numberId);
-      if (canonical !== jid) jid = await this.toDeliverableJid(numberId);
+      if (canonical !== jid) jid = await this.toDeliverableJid(numberId, sock);
     }
     const message = typeof content === 'function' ? await content() : content;
-    if (this.host.getSocketOrNull() !== sock) throw markNothingSent(new EngineNotReadyError());
+    this.sock(sock);
     const mediaUploadTimeoutMs = this.uploadTimeoutMs();
     const sendOptions = mediaUploadTimeoutMs ? { ...options, mediaUploadTimeoutMs } : options;
     let sent: WAMessage | undefined;
@@ -1154,9 +1208,15 @@ export class BaileysMessaging {
    * id we cannot resolve is a hard failure rather than a silent unquoted send: the caller asked for
    * a reply, and a plain message delivered under that name is the wrong result reported as success.
    */
-  private async quoteOption(quotedMessageId?: string): Promise<MiscMessageGenerationOptions | undefined> {
+  private async quoteOption(
+    quotedMessageId?: string,
+    expected?: WASocket,
+  ): Promise<MiscMessageGenerationOptions | undefined> {
     if (!quotedMessageId) return undefined;
-    return { quoted: await this.requireStored(quotedMessageId) };
+    if (expected) this.sock(expected);
+    const quoted = await this.requireStored(quotedMessageId);
+    if (expected) this.sock(expected);
+    return { quoted };
   }
 
   /**
@@ -1228,9 +1288,20 @@ export class BaileysMessaging {
       const lid = requested.kind === 'lid' ? requested.userPart : stored.userPart;
       if (typeof socket.executeUSyncQuery === 'function') {
         const library = await this.host.loadLib();
-        if (this.host.getSocketOrNull() !== socket) throw markNothingSent(new EngineNotReadyError());
-        const confirmed = await queryLidPhone(socket, library, phone, lid, this.queryBudgetMs);
-        if (this.host.getSocketOrNull() !== socket) throw markNothingSent(new EngineNotReadyError());
+        this.sock(socket);
+        let confirmed: boolean;
+        try {
+          confirmed = await queryLidPhone(socket, library, phone, lid, this.queryBudgetMs);
+        } catch (error) {
+          this.sock(socket);
+          // A read before any write, so no message went out whatever stopped it. A rate limit keeps its own
+          // class, which already says so.
+          if (error instanceof EngineTransportError && !(error instanceof EngineThrottledError)) {
+            throw new EngineNotSentError(error.message);
+          }
+          throw markNothingSent(error);
+        }
+        this.sock(socket);
         if (confirmed) {
           this.host.recordLidMapping(`${lid}@lid`, `${phone}@s.whatsapp.net`);
           return;

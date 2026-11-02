@@ -488,6 +488,61 @@ describe('BaileysSessionStore', () => {
     expect(store.listChats().find(c => c.id === '628111@c.us')?.lastMessage).toBeUndefined();
   });
 
+  it('keeps a deleted last message cleared when a late edit of it arrives', () => {
+    store.upsertChats([{ id: '628111@s.whatsapp.net', name: 'Alice' }]);
+    store.recordMessage({
+      key: { remoteJid: '628111@s.whatsapp.net', id: 'M1' },
+      message: { conversation: 'original' },
+      messageTimestamp: 200,
+    });
+    store.recordMessageEdit('628111@c.us', 'M1', '', 'revoked');
+    store.recordMessageEdit('628111@c.us', 'M1', 'written after the delete');
+    expect(store.listChats()[0]).toMatchObject({ lastMessage: '', lastMessageType: 'revoked' });
+
+    // A repeated delete changes nothing, and a newer message still replaces the cleared preview.
+    store.recordMessageEdit('628111@c.us', 'M1', '', 'revoked');
+    expect(store.listChats()[0]).toMatchObject({ lastMessage: '', lastMessageType: 'revoked' });
+    store.recordMessage({
+      key: { remoteJid: '628111@s.whatsapp.net', id: 'M2' },
+      message: { conversation: 'newer' },
+      messageTimestamp: 300,
+    });
+    expect(store.listChats()[0]).toMatchObject({ lastMessage: 'newer' });
+  });
+
+  it('keeps a deleted lid-filed preview cleared when a late edit arrives under the phone id', () => {
+    store.addLidMappings([{ lid: '999@lid', pn: '628111@s.whatsapp.net' }]);
+    store.recordMessage({
+      key: { remoteJid: '999@lid', id: 'M1' },
+      message: { conversation: 'secret' },
+      messageTimestamp: 200,
+    });
+    store.upsertChats([{ id: '628111@s.whatsapp.net' }, { id: '999@lid' }]);
+    const accept = (): boolean => true;
+    store.recordMessageEdit('628111@c.us', 'M1', '', 'revoked', accept);
+    store.recordMessageEdit('628111@c.us', 'M1', 'written after the delete', undefined, accept);
+    expect(store.listChats().find(c => c.id === '999@lid')).toMatchObject({
+      lastMessage: '',
+      lastMessageType: 'revoked',
+    });
+  });
+
+  it('does not let a change under another phone id reach the preview of a broadcast-list message filed under a lid', () => {
+    // A received broadcast-list message previews in its sender's chat, with the list as the message's remoteJid.
+    store.recordMessage({
+      key: { remoteJid: 'list1@broadcast', participant: '111@lid', id: 'X', fromMe: false },
+      message: { conversation: 'bob broadcast text' },
+      messageTimestamp: 200,
+    });
+    store.upsertChats([{ id: '111@lid' }]);
+    // An accept that judges nothing: previewAuthor says the same for an envelope that carries no participant.
+    const accept = (): boolean => true;
+    store.recordMessageEdit('628333@s.whatsapp.net', 'X', 'text from another contact', undefined, accept);
+    store.recordMessageEdit('628333@s.whatsapp.net', 'X', '', 'revoked', accept);
+    expect(store.listChats()[0]).toMatchObject({ lastMessage: 'bob broadcast text' });
+    expect(store.listChats()[0].lastMessageType).not.toBe('revoked');
+  });
+
   it('flags a group chat by jid', () => {
     store.upsertChats([{ id: '123-456@g.us', name: 'Grp' }]);
     expect(store.listChats()[0].isGroup).toBe(true);
@@ -990,7 +1045,7 @@ describe('BaileysSessionStore', () => {
         name: 'Alice',
       }) as Record<string, unknown>;
 
-    it('lists one row and keeps a state WhatsApp syncs under the lid, across a restart', () => {
+    it('lists the phone and lid records apart and keeps a state WhatsApp syncs under the lid, across a restart', () => {
       const s = newStore();
       s.upsertChats([historyChat(PHONE)]);
       s.addLidMappings([{ lid: LID, pn: PHONE }]);
@@ -1000,7 +1055,10 @@ describe('BaileysSessionStore', () => {
         { id: LID, muteEndTime: -1 },
       ]);
       const expected = { id: '628111@c.us', name: 'Alice', pinned: true, archived: true, muted: true };
-      expect(s.listChats()).toEqual(expect.arrayContaining([expect.objectContaining(expected)]));
+      expect(s.listChats()).toEqual([
+        expect.objectContaining(expected),
+        expect.objectContaining({ id: '484848@lid', pinned: true, archived: true, muted: true }),
+      ]);
       expect([...fake.rows.keys()]).toEqual([K(PHONE)]);
 
       const restarted = newStore();

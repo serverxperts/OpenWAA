@@ -709,7 +709,8 @@ export class BaileysSessionStore {
   /**
    * Refresh the chat preview when (and only when) the edited message is still the latest message in
    * that chat. Editing an older message must not replace the preview or reorder the conversation. The
-   * preview may sit on any twin of the chat, the one the listing reads included, so each is checked.
+   * preview is checked under `chatId` and its engine form and, when `accept` is given for a phone chat,
+   * under any lid chat whose preview is this message; a caller that knows other twins passes each one.
    * `accept`, when given, judges the key the preview holds: a change it refuses leaves the preview alone.
    */
   recordMessageEdit(
@@ -720,8 +721,24 @@ export class BaileysSessionStore {
     accept?: (key: WAMessageKey) => boolean,
   ): void {
     if (!messageId) return;
-    for (const key of new Set([chatId, this.toEngineJid(chatId)])) {
+    const targets = new Set([chatId, this.toEngineJid(chatId)]);
+    if (accept && parseWaId(chatId).kind === 'user') {
+      // Only a preview whose own message sits in a lid chat: `accept` judges the chat of exactly those, and a
+      // received broadcast-list message previews under its sender's lid with the list as its remoteJid.
+      for (const [key, existing] of this.lastMessages.entries()) {
+        if (
+          existing.key.id === messageId &&
+          parseWaId(key).kind === 'lid' &&
+          parseWaId(existing.key.remoteJid ?? '').kind === 'lid'
+        ) {
+          targets.add(key);
+        }
+      }
+    }
+    for (const key of targets) {
       const existing = this.lastMessages.get(key);
+      // A delete is final: an edit that reaches the preview afterwards must not bring the deleted text back.
+      if (existing?.type === 'revoked' && type !== 'revoked') continue;
       if (existing?.key.id === messageId && (!accept || accept(existing.key)))
         this.lastMessages.set(key, { ...existing, text, type: type ?? existing.type });
     }
@@ -912,13 +929,13 @@ export class BaileysSessionStore {
   }
 
   /**
-   * One row per conversation. A contact WhatsApp migrated to a lid can hold two records, one keyed by
+   * One row per neutral chat id. A contact WhatsApp migrated to a lid can hold two records, one keyed by
    * phone and one by lid (Baileys files an update under whichever id its source carried, and a record
-   * created before the lid->phone mapping was learned stays where it is), and both project to the same
-   * neutral id; listing each put two rows sharing one id into the answer. They fold like contacts do:
-   * the phone-keyed record is primary, the twin {@link chatJid} routes app-state writes to, and a field
-   * the primary lacks comes from the other. The preview is the newest message filed under any key that
-   * projects to the row, indexed in one pass rather than a twin scan per chat.
+   * created before the lid->phone mapping was learned stays where it is). The neutral id keeps a lid a
+   * lid ({@link toNeutralJid}), so those are two rows, `<phone>@c.us` and `<lid>@lid`, as the contact
+   * listing keeps the two identities apart. Records that do project to one id fold: the phone-keyed
+   * record is primary and a field it lacks comes from the other. The preview is the newest message filed
+   * under any key that projects to the row, indexed in one pass rather than a twin scan per chat.
    *
    * Every loop is over a SNAPSHOT: projecting an id resolves a lid through maps whose read moves the
    * entry to the most-recent end, so a live iterator would hand the same entry back forever.
