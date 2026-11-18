@@ -67,6 +67,12 @@ const finds = edits => edits.map(edit => edit.find).join('\n');
 const PATCHERS = [
   ['patch-baileys-appstate.js', '@whiskeysockets/baileys/lib/Socket/chats.js', m => m.LOOP_FIND],
   ['patch-baileys-newsletter-create.js', '@whiskeysockets/baileys/lib/Socket/newsletter.js', m => m.PARSE_FIND],
+  ['patch-baileys-media-stream.js', '@whiskeysockets/baileys/lib/Utils/messages-media.js', m => m.PIPE_FIND],
+  [
+    'patch-baileys-status-ack.js',
+    '@whiskeysockets/baileys/lib/Socket/messages-recv.js',
+    m => [m.MAP_FIND, m.HANDLER_FIND].join('\n'),
+  ],
   [
     'patch-wwebjs-block.js',
     'whatsapp-web.js/src/structures/Contact.js',

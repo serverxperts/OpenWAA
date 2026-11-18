@@ -127,7 +127,12 @@ function findFetchCall(method: string, path: string): FetchCall | undefined {
 // that answers with a stopped row; `startFailure`, `startResult` and `startGate` below change how a start
 // answers.
 // Mutable so a test can set the starting value and observe what a PATCH wrote back.
-let sessionConfig = { autoRejectCalls: false, maxReconnectAttempts: null as number | null, reconnectBaseDelay: 5000 };
+let sessionConfig = {
+  autoRejectCalls: false,
+  maxReconnectAttempts: null as number | null,
+  reconnectBaseDelay: 5000,
+  linkPreview: null as boolean | null,
+};
 let configPatchFails = false;
 let proxyGetFails = false;
 // How many of the next GET /api/sessions reads fail, as they do while the gateway is down.
@@ -1954,6 +1959,78 @@ test('an unrestricted session shows no restriction row', async () => {
   assert.equal(within(card).queryByText('Restriction') === null, true);
 });
 
+// WhatsApp asks some accounts for a passkey before it completes a link, and the engine cannot answer.
+// The request arrives with no status change, so the session is still at its QR when it is reported: the
+// pairing placeholder is the layout it has, and the restriction row used to exist only in the other one.
+const PASSKEY_RESTRICTION: Session['restriction'] = { kind: 'passkey_required', code: 'passkey_prologue_request' };
+
+async function withQrSessionRestriction<T>(
+  restriction: Session['restriction'],
+  run: (card: HTMLElement) => Promise<T>,
+): Promise<T> {
+  SESSION_QR.restriction = restriction;
+  try {
+    resetFetchCalls();
+    renderSessions();
+    const card = (await rtl.screen.findByText('new-device')).closest('.session-card') as HTMLElement;
+    return await run(card);
+  } finally {
+    delete SESSION_QR.restriction;
+  }
+}
+
+test('a session waiting for its QR shows a passkey restriction on the pairing placeholder', async () => {
+  const { within } = rtl;
+  await withQrSessionRestriction(PASSKEY_RESTRICTION, card => {
+    // Still the pairing layout: the restriction is added to it, it does not replace it.
+    assert.ok(card.querySelector('.qr-placeholder'));
+    within(card).getByRole('button', { name: 'Show QR' });
+    within(card).getByText('Restriction');
+    const value = within(card).getByText('Passkey required');
+    assert.match(value.getAttribute('title') ?? '', /passkey_prologue_request/);
+    return Promise.resolve();
+  });
+});
+
+test('a session waiting for its QR shows no restriction row when it has none', async () => {
+  const { within } = rtl;
+  await withQrSessionRestriction(undefined, card => {
+    assert.ok(card.querySelector('.qr-placeholder'));
+    assert.equal(within(card).queryByText('Restriction') === null, true);
+    return Promise.resolve();
+  });
+});
+
+test('the QR modal says WhatsApp asked for a passkey, on both tabs', async () => {
+  const { screen, fireEvent, within } = rtl;
+  await withQrSessionRestriction(PASSKEY_RESTRICTION, async card => {
+    fireEvent.click(within(card).getByRole('button', { name: 'Show QR' }));
+    await screen.findByAltText('QR');
+
+    const note = screen.getByRole('status');
+    assert.match(note.textContent ?? '', /WhatsApp asked for a passkey to finish linking this device/);
+    assert.match(note.textContent ?? '', /will not complete the link/);
+
+    // The phone tab is the other way to link, and WhatsApp asks for the passkey on it too.
+    fireEvent.click(screen.getByRole('tab', { name: 'Link with Phone Number' }));
+    assert.match(screen.getByRole('status').textContent ?? '', /asked for a passkey/);
+    // The phone tab shows a code to type, not one to scan, so the note must not tell the operator to scan.
+    assert.doesNotMatch(screen.getByRole('status').textContent ?? '', /scan/i);
+  });
+});
+
+test('the QR modal carries no passkey note for another restriction or none', async () => {
+  const { screen, fireEvent, within } = rtl;
+  for (const restriction of [undefined, { kind: 'reachout_timelock' as const, code: 'BIZ_QUALITY' }]) {
+    await withQrSessionRestriction(restriction, async card => {
+      fireEvent.click(within(card).getByRole('button', { name: 'Show QR' }));
+      await screen.findByAltText('QR');
+      assert.equal(screen.queryByText(/asked for a passkey/) === null, true);
+    });
+    rtl.cleanup();
+  }
+});
+
 // ── Live feed banner ─────────────────────────────────────────────────────────
 
 test('Refresh on a feed that never connected re-reads the list once the socket is back', async () => {
@@ -2184,7 +2261,7 @@ async function openDetailFor(name: string): Promise<HTMLInputElement> {
 
 test('the auto-reject toggle reflects the stored config and patches only the key it owns', async () => {
   resetFetchCalls();
-  sessionConfig = { autoRejectCalls: false, maxReconnectAttempts: null, reconnectBaseDelay: 5000 };
+  sessionConfig = { autoRejectCalls: false, maxReconnectAttempts: null, reconnectBaseDelay: 5000, linkPreview: null };
   configPatchFails = false;
   renderSessions();
 
@@ -2204,7 +2281,7 @@ test('the auto-reject toggle reflects the stored config and patches only the key
 
 test('a rejected write reverts the toggle instead of leaving it showing a state the gateway never accepted', async () => {
   resetFetchCalls();
-  sessionConfig = { autoRejectCalls: false, maxReconnectAttempts: null, reconnectBaseDelay: 5000 };
+  sessionConfig = { autoRejectCalls: false, maxReconnectAttempts: null, reconnectBaseDelay: 5000, linkPreview: null };
   configPatchFails = true;
   renderSessions();
 
@@ -2225,7 +2302,7 @@ test('a rejected write reverts the toggle instead of leaving it showing a state 
 test('a toggle answer that lands after its modal closed does not change another session', async () => {
   const { screen, within, fireEvent, waitFor } = rtl;
   resetFetchCalls();
-  sessionConfig = { autoRejectCalls: false, maxReconnectAttempts: null, reconnectBaseDelay: 5000 };
+  sessionConfig = { autoRejectCalls: false, maxReconnectAttempts: null, reconnectBaseDelay: 5000, linkPreview: null };
   configPatchFails = false;
   let release!: () => void;
   configPatchGate = new Promise<void>(resolve => (release = resolve));
@@ -2248,7 +2325,7 @@ test('a toggle answer that lands after its modal closed does not change another 
 test('a session reopened while its toggle saves keeps the toggle locked until that save answers', async () => {
   const { screen, within, fireEvent, waitFor } = rtl;
   resetFetchCalls();
-  sessionConfig = { autoRejectCalls: false, maxReconnectAttempts: null, reconnectBaseDelay: 5000 };
+  sessionConfig = { autoRejectCalls: false, maxReconnectAttempts: null, reconnectBaseDelay: 5000, linkPreview: null };
   configPatchFails = false;
   let release!: () => void;
   configPatchGate = new Promise<void>(resolve => (release = resolve));
@@ -2268,7 +2345,7 @@ test('a session reopened while its toggle saves keeps the toggle locked until th
 test("one session's toggle answer does not unlock another session's pending toggle", async () => {
   const { screen, within, fireEvent, waitFor } = rtl;
   resetFetchCalls();
-  sessionConfig = { autoRejectCalls: false, maxReconnectAttempts: null, reconnectBaseDelay: 5000 };
+  sessionConfig = { autoRejectCalls: false, maxReconnectAttempts: null, reconnectBaseDelay: 5000, linkPreview: null };
   configPatchFails = false;
   let releaseFirst!: () => void;
   configPatchGate = new Promise<void>(resolve => (releaseFirst = resolve));
@@ -2294,7 +2371,7 @@ test("one session's toggle answer does not unlock another session's pending togg
 test('a failed toggle that lands after its modal closed does not revert another session', async () => {
   const { screen, within, fireEvent, waitFor } = rtl;
   resetFetchCalls();
-  sessionConfig = { autoRejectCalls: false, maxReconnectAttempts: null, reconnectBaseDelay: 5000 };
+  sessionConfig = { autoRejectCalls: false, maxReconnectAttempts: null, reconnectBaseDelay: 5000, linkPreview: null };
   configPatchFails = true;
   let release!: () => void;
   configPatchGate = new Promise<void>(resolve => (release = resolve));
@@ -2307,7 +2384,7 @@ test('a failed toggle that lands after its modal closed does not revert another 
     await waitFor(() => assert.equal(screen.queryByRole('dialog') === null, true));
 
     // The second session has auto-reject on.
-    sessionConfig = { autoRejectCalls: true, maxReconnectAttempts: null, reconnectBaseDelay: 5000 };
+    sessionConfig = { autoRejectCalls: true, maxReconnectAttempts: null, reconnectBaseDelay: 5000, linkPreview: null };
     const other = await openDetailFor('stale-engine');
     assert.equal(other.checked, true);
     assert.equal(other.disabled, false, 'the pending toggle of the closed modal locked this one');

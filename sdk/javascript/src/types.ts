@@ -96,11 +96,12 @@ export interface SessionResponse {
  * A restriction WhatsApp has in force on a session's account.
  *
  * `reachout_timelock` leaves the session connected and existing chats working — only starting new
- * conversations is blocked — whereas `tos_block` and `proxy_block` refuse the connection itself and
- * therefore cannot coexist with a `ready` status.
+ * conversations is blocked — whereas `tos_block`, `proxy_block` and `passkey_required` stop a link or
+ * the connection itself and therefore cannot coexist with a `ready` status. `passkey_required` means
+ * WhatsApp asked for a passkey to finish linking a device, which the Baileys engine cannot answer.
  */
 export interface AccountRestriction {
-  kind: 'reachout_timelock' | 'tos_block' | 'proxy_block';
+  kind: 'reachout_timelock' | 'tos_block' | 'proxy_block' | 'passkey_required';
   /** The engine's own token for the cause, verbatim (`TOS_BLOCK`, `BIZ_QUALITY`, …). */
   code: string;
   /** ISO timestamp when enforcement ends, when WhatsApp states one. */
@@ -169,14 +170,16 @@ export interface GroupJoinInfo {
 /**
  * A session's effective runtime configuration.
  *
- * Only `maxReconnectAttempts` is nullable, and `null` there means UNLIMITED — not "unset". The
- * server always reports a concrete `reconnectBaseDelay` and `autoRejectCalls`.
+ * `null` on `maxReconnectAttempts` means UNLIMITED — not "unset"; `null` on `linkPreview` means the
+ * engine's own default. The server always reports a concrete `reconnectBaseDelay` and `autoRejectCalls`.
  */
 export interface SessionConfig {
   /** Baileys only: whatsapp-web.js stores the flag but cannot reject a call, so calls keep ringing there. */
   autoRejectCalls: boolean;
   maxReconnectAttempts: number | null;
   reconnectBaseDelay: number;
+  /** Link preview of a `send-text` or `send-template` that sets none; `null` keeps the engine's default. */
+  linkPreview: boolean | null;
 }
 
 /**
@@ -189,6 +192,11 @@ export interface UpdateSessionConfigRequest {
   autoRejectCalls?: boolean | null;
   maxReconnectAttempts?: number | null;
   reconnectBaseDelay?: number | null;
+  /**
+   * Link preview for a send-text or send-template that sets neither `linkPreview` nor `customLinkPreview`.
+   * `null` restores the engine's default.
+   */
+  linkPreview?: boolean | null;
 }
 
 /** Masked per-session proxy configuration — credentials are never returned. */
@@ -257,7 +265,8 @@ export interface SendTextRequest {
   /**
    * Controls the URL preview. `false` suppresses it on both engines. Otherwise the engines differ:
    * whatsapp-web.js builds one in-page by default, while on Baileys a preview is OPT-IN — it needs
-   * `true`, because generating one is a blocking outbound fetch per URL.
+   * `true`, because generating one is a blocking outbound fetch of the first URL in the text. Unset,
+   * the session's `linkPreview` config applies when one is set (OpenWA 0.30.3 or later).
    */
   linkPreview?: boolean;
   /**
@@ -606,6 +615,10 @@ export interface ChatHistoryMessage {
   kind: ChatKind;
   /** Disappearing-messages timer on the chat, in seconds. Absent when the chat has none set. */
   ephemeralDuration?: number;
+  /** True when the sender forwarded this message rather than writing it. Absent otherwise. */
+  isForwarded?: boolean;
+  /** How many times the message has been forwarded. Set with `isForwarded`. */
+  forwardingScore?: number;
   /** For group messages, the participant who sent it (`from` is the group JID). */
   author?: Jid;
   mentionedIds?: Jid[];

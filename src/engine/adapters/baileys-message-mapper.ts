@@ -892,6 +892,8 @@ interface BaileysContextCarrier {
     quotedMessage?: unknown;
     expiration?: number | null;
     mentionedJid?: string[] | null;
+    isForwarded?: boolean | null;
+    forwardingScore?: number | null;
   } | null;
 }
 
@@ -934,6 +936,9 @@ export interface BaileysMessageContext {
   ephemeralDuration?: number;
   /** @mentioned JIDs from `contextInfo.mentionedJid`. */
   mentionedJids?: string[];
+  /** `contextInfo.isForwarded` / `forwardingScore`: set when the sender forwarded the message. */
+  isForwarded?: boolean;
+  forwardingScore?: number;
   /** Styling of an extended-text (status) message: proto `backgroundArgb` (fixed32 ARGB). */
   backgroundArgb?: number;
   /** Styling of an extended-text (status) message: proto `font` (WhatsApp font index). */
@@ -978,6 +983,8 @@ export function extractBaileysContext(content: BaileysContextContent): BaileysMe
   const context: BaileysMessageContext = {
     ephemeralDuration: expiration ?? undefined,
     mentionedJids: contextInfo?.mentionedJid ?? undefined,
+    isForwarded: contextInfo?.isForwarded === true ? true : undefined,
+    forwardingScore: typeof contextInfo?.forwardingScore === 'number' ? contextInfo.forwardingScore : undefined,
     backgroundArgb: typeof extText?.backgroundArgb === 'number' ? extText.backgroundArgb : undefined,
     font: typeof extText?.font === 'number' ? extText.font : undefined,
   };
@@ -1016,18 +1023,31 @@ export function mapBaileysStatus(status: number | null | undefined): DeliverySta
   }
 }
 
-/** Extract native poll versions from content already normalized by Baileys. */
-export function extractBaileysPoll(content: proto.IMessage): IncomingMessage['poll'] {
-  const poll = pollCreationOf(content) ?? pollCreationOf(content.pollCreationMessageV4?.message);
+/** Extract un-truncated poll question, raw options and multi-select flag from normalized content. */
+export function extractBaileysRawPoll(
+  content: proto.IMessage | null | undefined,
+): { name: string; options: string[]; allowMultipleAnswers: boolean } | undefined {
+  const poll = pollCreationOf(content) ?? pollCreationOf(content?.pollCreationMessageV4?.message);
   if (!poll) return undefined;
   const options = (poll.options ?? [])
     .map(option => option.optionName)
     .filter((option): option is string => typeof option === 'string');
   if (!options.length) return undefined;
   return {
-    name: boundPollText(poll.name ?? ''),
-    options: boundPollOptions(options),
+    name: poll.name ?? '',
+    options,
     allowMultipleAnswers: poll.selectableOptionsCount !== 1,
+  };
+}
+
+/** Extract native poll versions from content already normalized by Baileys. */
+export function extractBaileysPoll(content: proto.IMessage): IncomingMessage['poll'] {
+  const raw = extractBaileysRawPoll(content);
+  if (!raw) return undefined;
+  return {
+    name: boundPollText(raw.name),
+    options: boundPollOptions(raw.options),
+    allowMultipleAnswers: raw.allowMultipleAnswers,
   };
 }
 
@@ -1072,6 +1092,9 @@ export interface BaileysIncomingFields {
   ephemeralDuration?: number;
   /** @mentioned engine JIDs from `contextInfo.mentionedJid`; normalized and surfaced as `mentionedIds`. */
   mentionedJids?: string[];
+  /** Forwarded flag and count from `contextInfo`; surfaced as `isForwarded` / `forwardingScore`. */
+  isForwarded?: boolean;
+  forwardingScore?: number;
   /** Styling of an extended-text (status) message: proto `backgroundArgb` (fixed32 ARGB). */
   backgroundArgb?: number;
   /** Styling of an extended-text (status) message: proto `font` (WhatsApp font index). */
@@ -1239,6 +1262,15 @@ export function buildIncomingMessageFromBaileys(
   // (message-mapper.ts:90), consumed by command targeting and the `mentions` webhook filter.
   if (fields.mentionedJids && fields.mentionedJids.length > 0) {
     incoming.mentionedIds = fields.mentionedJids.map(normalizeJid);
+  }
+
+  // Parity with the wwjs mapper: mark forwarded content so it is not attributed to the sender, gated
+  // on a positive score the same way ephemeralDuration is, above.
+  if (fields.isForwarded === true) {
+    incoming.isForwarded = true;
+    if (typeof fields.forwardingScore === 'number' && fields.forwardingScore > 0) {
+      incoming.forwardingScore = fields.forwardingScore;
+    }
   }
 
   return incoming;
