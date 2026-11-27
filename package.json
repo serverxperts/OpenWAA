@@ -547,6 +547,8 @@
     "puppeteer": "$puppeteer",
     "hono": "^4.13.19",
     "@hono/node-server": "^2.1.9",
-    "glob@10": "^14.0.6"
+    "glob": "^14.0.6",
+    "engine.io": "^6.6.12",
+    "express-rate-limit": "^8.7.5"
   }
 }
