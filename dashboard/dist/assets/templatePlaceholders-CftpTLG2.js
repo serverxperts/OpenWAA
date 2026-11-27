@@ -1,0 +1,2 @@
+var e=/\{\{\s*([\w.-]+)\s*\}\}|\{(\w+)\}/g;function t(t){let n=[t.header,t.body,t.footer].filter(Boolean).join(`
+`),r=new Map;for(let[,t,i]of n.matchAll(e)){let e=t??i;r.has(e)||r.set(e,t===void 0?`{${e}}`:`{{${e}}}`)}return[...r.keys()].sort().map(e=>({key:e,token:r.get(e)}))}export{t as n,e as t};

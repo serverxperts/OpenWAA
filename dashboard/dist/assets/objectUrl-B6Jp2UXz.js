@@ -1,0 +1,1 @@
+function e(e){let t=typeof URL.revokeObjectURL==`function`?URL.revokeObjectURL.bind(URL):null;t&&setTimeout(()=>{t(e)},1e3).unref?.()}export{e as t};
