@@ -373,7 +373,9 @@ async function bootstrap() {
 // runBootstrapOrExit logs the failure, runs a bounded best-effort app.close() teardown, then exits(1); a
 // successful boot returns without touching exit. Puppeteer's own `exit` handlers kill any browser
 // children still up.
-if (require.main === module) {
+// On Hostinger and other Passenger / Cloud Node.js hosts, the entry file is required by the
+// hosting runner so require.main !== module. Only skip runBootstrapOrExit in test environments.
+if (process.env.NODE_ENV !== 'test') {
   void runBootstrapOrExit(bootstrap, {
     logger: createLogger('Bootstrap'),
     closeApp: () => (closeAppHandler ? closeAppHandler() : appInstance ? appInstance.close() : Promise.resolve()),
